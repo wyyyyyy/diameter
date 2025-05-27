@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Go Program",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}",      // 你的main.go所在目录或包路径
+      "cwd": "${workspaceFolder}",          // 工作目录，确保有go.mod文件
+      "args": ["-p", "12345"],              // 这里写你的程序参数
+      "env": {},                           // 需要的环境变量，比如 {"GO111MODULE": "on"}
+      "buildFlags": "-gcflags=all=-N -l",  // 禁用优化，方便调试（可选）
+      "dlvToolPath": "",                    // 如果你用自定义dlv路径可以写这里
+      "showLog": true                      // 调试日志开关，方便定位问题
+    }
+  ]
+}

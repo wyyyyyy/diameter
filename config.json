@@ -1,0 +1,12 @@
+{
+  "origin_host": "client.example.com",
+  "origin_realm": "example.com",
+  "host_ip_address": "127.0.0.1",
+  "product_name": "SimpleDiameterServer",
+  "auth_application_id": 0,
+  "command_app_map": {
+    "257": 0,
+    "258": 4,
+    "300": 16777216
+  }
+}
