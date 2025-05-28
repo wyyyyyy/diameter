@@ -1,15 +1,11 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
-	"os"
 	"strconv"
 )
 
@@ -18,11 +14,6 @@ func main() {
 	port := flag.Int("p", 3868, "port to listen on")
 	flag.Parse()
 	log.SetPrefix(" [Diameter] ")
-	err := LoadConfig("config.json")
-	if err != nil {
-		log.Fatalf("Load config failed: %v", err)
-	}
-
 	addr := fmt.Sprintf(":%d", *port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -42,11 +33,18 @@ func main() {
 	}
 }
 
+type Session struct {
+	ID        string
+	needClose bool
+	// 其他字段...
+}
+
 // 单个会话处理
 func handleConnection(conn net.Conn) {
+	defer recover()
 	defer conn.Close()
 	defer log.Printf("Connection from %v closed", conn.RemoteAddr())
-
+	session := &Session{}
 	for {
 		var diameterMsg DiameterMsg
 		diameterMsg.body = make([]*AVPMsg, 0, 10)
@@ -100,7 +98,7 @@ func handleConnection(conn net.Conn) {
 		}
 
 		// 处理diameterMsg，err是要断开连接的，不想断开连接的不要返回err，业务err在rsp中返回
-		rsp, err := handleDiameter(&diameterMsg)
+		rsp, err := handleDiameter(session, &diameterMsg)
 		if rsp != nil {
 			log.Printf("rsp bytes: % x\n", rsp.ToBytes())
 			conn.Write(rsp.ToBytes())
@@ -114,49 +112,7 @@ func handleConnection(conn net.Conn) {
 
 /////////////////////////////////////////////////////////////////////////////////////////
 
-type DiameterHandler func(msg *DiameterMsg) (*DiameterMsg, error)
-
-const (
-	Cmd_CE   uint32 = 257      // Capabilities Exchange (CER/CEA)
-	Cmd_DW   uint32 = 280      // Device Watchdog (DWR/DWA)
-	Cmd_DP   uint32 = 282      // Disconnect Peer (DPR/DPA)
-	Cmd_AC   uint32 = 265      // Accounting (ACR/ACA)
-	Cmd_RA   uint32 = 258      // Re-Auth (RAR/RAA)
-	Cmd_AS   uint32 = 274      // Abort Session (ASR/ASA)
-	Cmd_CC   uint32 = 272      // Credit Control (CCR/CCA)
-	Cmd_TEST uint32 = 16777214 // Credit Control (CCR/CCA)
-)
-const (
-	// 成功类
-	ResultCode_Success = 2001 // 请求成功完成
-
-	// 协议错误类（Permanent Failures 5xxx）
-	ResultCode_MissingAVP             = 5005 // 缺少必须的 AVP
-	ResultCode_AVPUnsupported         = 5001 // 不支持的 AVP
-	ResultCode_UnknownSessionID       = 5002 // 会话 ID 未知
-	ResultCode_AuthenticationRejected = 4001 // 拒绝认证（常用于 AAA）
-
-	// 应用错误类（Transient Failures 4xxx）
-	ResultCode_UnableToComply = 5012 // 无法满足请求
-
-	// 路由错误类
-	ResultCode_UnableToDeliver            = 3002 // 无法路由此消息
-	ResultCode_RealmNotServed             = 3003 // 域不受支持
-	ResultCode_DestinationHostUnsupported = 3004
-
-	// 命令类错误
-	ResultCode_CommandUnsupported     = 3001 // 不支持的命令码
-	ResultCode_ApplicationUnsupported = 3007 // 不支持的应用
-)
-
-var diameterHandlers = map[uint32]DiameterHandler{
-	Cmd_CE: handleCER,  // Capability Exchange Request
-	Cmd_DW: handleDWR,  // Device-Watchdog-Request
-	Cmd_DP: handleDPR,  // Disconnect-Peer-Request
-	Cmd_RA: handleTest, // 测试认证
-}
-
-func handleDiameter(msg *DiameterMsg) (*DiameterMsg, error) {
+func handleDiameter(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	cmdCode := msg.GetCommandCode()
 	handler, exists := diameterHandlers[cmdCode]
 	if !exists {
@@ -168,12 +124,12 @@ func handleDiameter(msg *DiameterMsg) (*DiameterMsg, error) {
 			Build()
 		return response, fmt.Errorf("%d: %d", ResultCode_CommandUnsupported, cmdCode)
 	}
-	return handler(msg)
+	return handler(session, msg)
 }
 
 // ///////////////////////////////////////////////////////////////////////////////////////
 
-func handleCER(msg *DiameterMsg) (*DiameterMsg, error) {
+func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	log.Println("Handling CER")
 	// 构造并发送 CEA
 	builder := NewDiameterMsgBuilder().
@@ -194,7 +150,7 @@ func handleCER(msg *DiameterMsg) (*DiameterMsg, error) {
 	return builder.Build(), nil
 }
 
-func handleDWR(msg *DiameterMsg) (*DiameterMsg, error) {
+func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	log.Println("Handling DWR")
 
 	rsp := NewDiameterMsgBuilder().
@@ -214,7 +170,7 @@ func handleDWR(msg *DiameterMsg) (*DiameterMsg, error) {
 	return rsp, nil
 }
 
-func handleDPR(msg *DiameterMsg) (*DiameterMsg, error) {
+func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	log.Println("Handling DPR")
 	// 构造并发送 DPA
 
@@ -232,21 +188,70 @@ func handleDPR(msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
 		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(config.GetAppID(msg.GetCommandCode())).Build()).
 		Build()
-	return rsp, errors.New("close connection")
+	session.needClose = true
+	return rsp, nil
 }
 
-func handleTest(msg *DiameterMsg) (*DiameterMsg, error) {
-	return nil, fmt.Errorf("unsupport DiameterMsg AAR")
+func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	rspBuilder := NewDiameterMsgBuilder().
+		SetCommandCode(msg.GetCommandCode()).
+		SetAppID(config.GetAppID(msg.GetCommandCode())).
+		SetFlags(FlagResponse).
+		SetHopByHopID(msg.GetHopByHopID()).
+		SetEndToEndID(msg.GetEndToEndID()).
+		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
+		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
+		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build())
+	sessionAVP := msg.FindAVPByCode(AVP_SessionId)
+	if sessionAVP == nil {
+		sessionID := generateSessionID(config.OriginHost)
+		rspBuilder = rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_SessionId, AVPFlag_Mandatory).SetStringData(sessionID).Build()).
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("missing sessionID").Build())
+
+		return rspBuilder.Build(), nil
+	} else {
+		rspBuilder.
+			AddAVP(sessionAVP)
+	}
+	avpUserID := msg.FindAVPByCode(AVP_UserID)
+	avpPassWD := msg.FindAVPByCode(AVP_UserPassword)
+	if avpUserID == nil || avpPassWD == nil {
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("missing userID or passWD").Build())
+		return rspBuilder.Build(), nil
+	}
+
+	userID := avpUserID.GetIntData()
+	reqPasswd := avpPassWD.GetStringData()
+
+	if passwd, ok := config.UserID2passWD[strconv.Itoa(int(userID))]; ok && reqPasswd == passwd {
+		//验证通过
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
+			AddAVP(NewAVPBuilder(AVP_AuthToken, AVPFlag_Mandatory).SetStringData(config.UserID2OauthToken[strconv.Itoa(int(userID))]).Build())
+
+		return rspBuilder.Build(), nil
+	} else {
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_AuthenticationRejected).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("userID or passWD wrong").Build())
+		return rspBuilder.Build(), nil
+	}
 }
 
 // ///////////////////////////////////////////////////////////////////////////////////////
 
 type DiameterConfig struct {
-	OriginHost    string            `json:"origin_host"`
-	OriginRealm   string            `json:"origin_realm"`
-	HostIPAddress string            `json:"host_ip_address"`
-	ProductName   string            `json:"product_name"`
-	CommandAppMap map[string]uint32 `json:"command_app_map"`
+	OriginHost        string            `json:"origin_host"`
+	OriginRealm       string            `json:"origin_realm"`
+	HostIPAddress     string            `json:"host_ip_address"`
+	ProductName       string            `json:"product_name"`
+	CommandAppMap     map[string]uint32 `json:"command_app_map"`
+	UserID2passWD     map[string]string `json:"userid_2_password"`
+	UserID2OauthToken map[string]string `json:"userid_2_oauthtoken"`
 }
 
 func (c *DiameterConfig) GetAppID(cmdID uint32) uint32 {
@@ -257,18 +262,3 @@ func (c *DiameterConfig) GetAppID(cmdID uint32) uint32 {
 }
 
 var config DiameterConfig
-
-func LoadConfig(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	bytes, err := ioutil.ReadAll(file)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(bytes, &config)
-}

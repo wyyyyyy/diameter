@@ -3,8 +3,6 @@
 
 ncat 模拟慢速连接：
 
-./freeDiameterd -c fd-peer1.conf -dd 
-./freeDiameterd -c fd-peer2.conf -dd 
 
 # 编译freediameter插件
 cd build
@@ -19,3 +17,5 @@ pgrep freeDiameterd | xargs sudo kill -SIGUSR1
 
 
 sudo tcpdump -i lo -s 0 -w "/home/ayyyyya/codes/diameter/diameter_capture_$(date +%Y%m%d_%H%M%S).pcap" 'port 3868 or port 3869'
+
+printf "%d\n" 0x1A

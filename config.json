@@ -8,5 +8,11 @@
     "257": 0,
     "258": 4,
     "300": 16777216
+  },
+  "userid_2_password": {
+    "9527": "12345678"
+  },
+  "userid_2_oauthtoken": {
+    "9527": "sadfljasdlkfjlasdjfkllaksdjf"
   }
 }

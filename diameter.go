@@ -2,8 +2,37 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
+	"time"
 )
+
+func init() {
+	err := LoadConfig("config.json")
+	if err != nil {
+		log.Fatalf("Load config failed: %v", err)
+	}
+}
+
+var config DiameterConfig
+
+func LoadConfig(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	bytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(bytes, &config)
+}
 
 type DiameterMsgBuilder struct {
 	msg *DiameterMsg
@@ -14,6 +43,48 @@ const (
 	FlagResponse = 0x00
 	VendorIETF   = 0
 )
+
+type DiameterHandler func(session *Session, msg *DiameterMsg) (*DiameterMsg, error)
+
+const (
+	Cmd_CE   uint32 = 257      // Capabilities Exchange (CER/CEA)
+	Cmd_DW   uint32 = 280      // Device Watchdog (DWR/DWA)
+	Cmd_DP   uint32 = 282      // Disconnect Peer (DPR/DPA)
+	Cmd_AC   uint32 = 265      // Accounting (ACR/ACA)
+	Cmd_RA   uint32 = 258      // Re-Auth (RAR/RAA)
+	Cmd_AS   uint32 = 274      // Abort Session (ASR/ASA)
+	Cmd_CC   uint32 = 272      // Credit Control (CCR/CCA)
+	Cmd_TEST uint32 = 16777051 // Credit Control (CCR/CCA)
+)
+const (
+	// 成功类
+	ResultCode_Success = 2001 // 请求成功完成
+
+	// 协议错误类（Permanent Failures 5xxx）
+	ResultCode_MissingAVP             = 5005 // 缺少必须的 AVP
+	ResultCode_AVPUnsupported         = 5001 // 不支持的 AVP
+	ResultCode_UnknownSessionID       = 5002 // 会话 ID 未知
+	ResultCode_AuthenticationRejected = 4001 // 拒绝认证（常用于 AAA）
+
+	// 应用错误类（Transient Failures 4xxx）
+	ResultCode_UnableToComply = 5012 // 无法满足请求
+
+	// 路由错误类
+	ResultCode_UnableToDeliver            = 3002 // 无法路由此消息
+	ResultCode_RealmNotServed             = 3003 // 域不受支持
+	ResultCode_DestinationHostUnsupported = 3004
+
+	// 命令类错误
+	ResultCode_CommandUnsupported     = 3001 // 不支持的命令码
+	ResultCode_ApplicationUnsupported = 3007 // 不支持的应用
+)
+
+var diameterHandlers = map[uint32]DiameterHandler{
+	Cmd_CE:   handleCER,  // Capability Exchange Request
+	Cmd_DW:   handleDWR,  // Device-Watchdog-Request
+	Cmd_DP:   handleDPR,  // Disconnect-Peer-Request
+	Cmd_TEST: handleTest, // 测试认证
+}
 
 func NewDiameterMsgBuilder() *DiameterMsgBuilder {
 	return &DiameterMsgBuilder{
@@ -72,7 +143,33 @@ func (b *DiameterMsgBuilder) Build() *DiameterMsg {
 
 type DiameterMsg struct {
 	head [20]byte
+	// avp code 可能重复，式合法的，所以不能用map
 	body []*AVPMsg
+}
+
+func generateSessionID(originHost string) string {
+	now := time.Now()
+	pid := os.Getpid()
+	return fmt.Sprintf("%s;%d.%09d;%d", originHost, now.Unix(), now.Nanosecond(), pid)
+}
+
+func (m *DiameterMsg) FindAVPByCode(code uint32) *AVPMsg {
+	for _, avp := range m.body {
+		if avp.GetCode() == code {
+			return avp
+		}
+	}
+	return nil
+}
+
+func (m *DiameterMsg) FindAVPsByCode(code uint32) []*AVPMsg {
+	var result []*AVPMsg
+	for _, avp := range m.body {
+		if avp.GetCode() == code {
+			result = append(result, avp)
+		}
+	}
+	return result
 }
 
 // Validate 验证Diameter头部是否合法
@@ -89,12 +186,14 @@ func (d *DiameterMsg) Validate() error {
 		return fmt.Errorf("not a request message (R-bit not set)")
 	}
 
+	// 检查该带的AVP是不是都带了
+
 	return nil
 }
 
 // 是否请求类型
 func (d *DiameterMsg) IsRequest() bool {
-	return d.head[4]&0x80 != 0
+	return d.head[4]&FlagRequest != 0
 }
 
 // 版本号（通常是1）

@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"time"
 )
 
@@ -51,6 +53,8 @@ const (
 	AVP_RedirectHost          = 292
 	AVP_FirmwareRevision      = 267
 	AVP_Drmp                  = 278
+	AVP_UserID                = 16777052
+	AVP_AuthToken             = 16777055
 	// ...根据需要继续添加
 )
 
@@ -68,7 +72,7 @@ type AVPBuilder struct {
 
 func NewAVPBuilder(code uint32, flags byte) *AVPBuilder {
 	var other []byte
-	if flags&0x80 != 0 {
+	if flags&AVPFlag_VendorSpecific != 0 {
 		other = make([]byte, 4) // Reserve 4 bytes for Vendor-ID
 	} else {
 		other = make([]byte, 0)
@@ -81,7 +85,7 @@ func NewAVPBuilder(code uint32, flags byte) *AVPBuilder {
 }
 
 func (b *AVPBuilder) SetVendorID(id uint32) *AVPBuilder {
-	if b.flags&0x80 == 0 {
+	if b.flags&AVPFlag_VendorSpecific == 0 {
 		panic("SetVendorID called, but V-bit not set in flags")
 	}
 	binary.BigEndian.PutUint32(b.other[0:4], id)
@@ -90,7 +94,7 @@ func (b *AVPBuilder) SetVendorID(id uint32) *AVPBuilder {
 
 func (b *AVPBuilder) SetData(data []byte) *AVPBuilder {
 	offset := 0
-	if b.flags&0x80 != 0 {
+	if b.flags&AVPFlag_VendorSpecific != 0 {
 		offset = 4
 	}
 	// 重置 other 为前缀 + 数据
@@ -198,8 +202,61 @@ func (a *AVPMsg) GetLength() uint32 {
 	return uint32(a.head[5])<<16 | uint32(a.head[6])<<8 | uint32(a.head[7])
 }
 
+// 获取padding长度
+func (a *AVPMsg) GetPaddingLength() int {
+	length := int(a.GetLength())
+	return (4 - (length % 4)) % 4
+}
+
 func (a *AVPMsg) HasVendorID() bool {
-	return a.head[4]&0x80 != 0
+	return a.head[4]&AVPFlag_VendorSpecific != 0
+}
+
+func (a *AVPMsg) getOffset() int {
+	if a.HasVendorID() {
+		return 4 // 有 Vendor-ID，占 4 字节（Vendor-ID 是 uint32）
+	}
+	return 0
+}
+
+// GetRawData 返回原始data数据，不包含head，vendor-id
+func (a *AVPMsg) GetRawData() []byte {
+	offset := a.getOffset()
+	end := len(a.other) - a.GetPaddingLength()
+	return a.other[offset:end]
+}
+
+// GetIntData 将有效数据视为 uint32（大端）
+func (a *AVPMsg) GetIntData() uint32 {
+	data := a.GetRawData()
+	return binary.BigEndian.Uint32(data[:4])
+}
+
+// GetStringData 将有效数据视为 UTF-8 字符串
+func (a *AVPMsg) GetStringData() string {
+	return string(a.GetRawData())
+}
+
+// GetTimeData 解析时间戳（4 字节秒数）
+func (a *AVPMsg) GetTimeData() time.Time {
+	data := a.GetRawData()
+	if len(data) < 4 {
+		return time.Time{} // 返回零时间
+	}
+	seconds := binary.BigEndian.Uint32(data[:4])
+	return time.Unix(int64(seconds), 0)
+}
+
+func (a *AVPMsg) GetIPAddrData() net.IP {
+	data := a.GetRawData()
+	if len(data) < 6 {
+		return nil
+	}
+	// 只支持 IPv4，前2字节类型应为0x0001
+	if data[0] != 0x00 || data[1] != 0x01 {
+		return nil
+	}
+	return net.IP(data[2:6])
 }
 
 // 返回 AVP 除去 header（header不包含vendor-id）外剩下的长度，包括 vendor-id + data + padding
@@ -231,4 +288,57 @@ func (avp *AVPMsg) ToBytes() []byte {
 	copy(buf[0:8], avp.head[:])
 	copy(buf[8:], avp.other)
 	return buf
+}
+
+type AVPMeta struct {
+	Name string `json:"name"`
+	Code uint32 `json:"code"`
+	Type string `json:"type"`
+}
+
+type CommandMeta struct {
+	Name          string   `json:"name"`
+	Code          uint32   `json:"code"`
+	Request       bool     `json:"request"`
+	ApplicationID uint32   `json:"application_id"`
+	AVPCodes      []uint32 `json:"avps"`
+}
+
+type Dictionary struct {
+	Commands []CommandMeta `json:"commands"`
+	AVPs     []AVPMeta     `json:"avps"`
+}
+
+var (
+	AVPDict     = map[uint32]AVPMeta{}
+	CommandDict = map[uint32]CommandMeta{} // key: code<<1 | btoi(request)
+)
+
+func btoi(b bool) uint32 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func loadDictionaryOrPanic(filename string) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		panic(fmt.Sprintf("failed to read dictionary.json: %v", err))
+	}
+	var dict Dictionary
+	if err := json.Unmarshal(data, &dict); err != nil {
+		panic(fmt.Sprintf("failed to parse dictionary.json: %v", err))
+	}
+	for _, avp := range dict.AVPs {
+		AVPDict[avp.Code] = avp
+	}
+	for _, cmd := range dict.Commands {
+		key := (cmd.Code << 1) | btoi(cmd.Request)
+		CommandDict[key] = cmd
+	}
+}
+
+func init() {
+	loadDictionaryOrPanic("dict.json")
 }
