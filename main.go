@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"time"
 )
 
 func main() {
@@ -28,7 +29,6 @@ func main() {
 			log.Printf("Accept error: %v", err)
 			continue
 		}
-		log.Printf("Accepted connection from %v", conn.RemoteAddr())
 		go handleConnection(conn)
 	}
 }
@@ -43,21 +43,22 @@ type Session struct {
 func handleConnection(conn net.Conn) {
 	defer recover()
 	defer conn.Close()
-	defer log.Printf("Connection from %v closed", conn.RemoteAddr())
+	defer log.Printf("Closed Connection from %v", conn.RemoteAddr())
+	log.Printf("Accepted connection from %v", conn.RemoteAddr())
 	session := &Session{}
 	for {
 		var diameterMsg DiameterMsg
 		diameterMsg.body = make([]*AVPMsg, 0, 10)
 		// 客户端30s发一次保活，这里设置40s超时时间，需要考虑半包/空连接攻击
-		// conn.SetReadDeadline(time.Now().Add(40 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(40 * time.Second))
 		if _, err := io.ReadFull(conn, diameterMsg.head[:]); err != nil {
-			log.Printf("read diameter header error: %v", err)
+			log.Printf("dropDiameter for read diameter header error: %v", err)
 			return
 		}
 		// 已经收到报头的情况下，1s内收不完剩余数据，不属于正常情况，断开即可。
-		// conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		if err := diameterMsg.Validate(); err != nil {
-			log.Printf("parse diameter header error: %v", err)
+			log.Printf("dropDiameter for parse diameter header error: %v", err)
 			return
 		}
 
@@ -68,24 +69,24 @@ func handleConnection(conn net.Conn) {
 			var avpMsg AVPMsg
 
 			if _, err := io.ReadFull(conn, avpMsg.head[:]); err != nil {
-				log.Printf("read avp header error: %v", err)
+				log.Printf("dropDiameter for read avp header error: %v", err)
 				return
 			}
 			readBodyLen += len(avpMsg.head)
 
 			if err := avpMsg.Validate(); err != nil {
-				log.Printf("parse avp header error: %v", err)
+				log.Printf("dropDiameter for parse avp header error: %v", err)
 				return
 			}
 
 			otherLen := avpMsg.GetOtherLen()
 			avpMsg.other = make([]byte, otherLen)
 			if readBodyLen+otherLen > bodyLen {
-				log.Printf("read more bytes than body length: %d > %d", readBodyLen, bodyLen)
+				log.Printf("dropDiameter for read more bytes than body length error: %d > %d", readBodyLen, bodyLen)
 				return
 			}
 			if _, err := io.ReadFull(conn, avpMsg.other); err != nil {
-				log.Printf("read avp other error: %v", err)
+				log.Printf("dropDiameter for read avp body error: %v", err)
 				return
 			}
 			readBodyLen += otherLen
@@ -93,18 +94,23 @@ func handleConnection(conn net.Conn) {
 		}
 
 		if readBodyLen != bodyLen {
-			log.Printf("avp length mismatch error: read %d, expect %d", readBodyLen, bodyLen)
+			log.Printf("dropDiameter for avp length mismatch error: read %d, expect %d", readBodyLen, bodyLen)
 			return
 		}
 
 		// 处理diameterMsg，err是要断开连接的，不想断开连接的不要返回err，业务err在rsp中返回
+		log.Printf("handleDiameter req:\n %s\n\n\n\n", diameterMsg.toString())
 		rsp, err := handleDiameter(session, &diameterMsg)
 		if rsp != nil {
-			log.Printf("rsp bytes: % x\n", rsp.ToBytes())
 			conn.Write(rsp.ToBytes())
+			log.Printf("handleDiameter rsp:\n %s\n\n\n\n", rsp.toString())
 		}
 		if err != nil {
-			log.Printf("handleDiameter error %v", err)
+			log.Printf("handleDiameter err\n %v", err)
+			return
+		}
+		if session.needClose {
+			log.Print("handleDiameter finish\n")
 			return
 		}
 	}
@@ -113,16 +119,38 @@ func handleConnection(conn net.Conn) {
 /////////////////////////////////////////////////////////////////////////////////////////
 
 func handleDiameter(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	sessionAVP, _ := msg.FindAVPByCode(AVP_SessionId)
+	if sessionAVP == nil {
+		sessionAVP = NewAVPBuilder(AVP_SessionId, AVPFlag_Mandatory).SetStringData(generateSessionID(config.OriginHost)).Build()
+	}
+	rspBuilder := NewDiameterMsgBuilder().
+		AddAVP(sessionAVP).
+		SetCommandCode(msg.GetCommandCode()).
+		SetAppID(config.GetAppID(msg.GetCommandCode())).
+		SetFlags(FlagResponse).
+		SetHopByHopID(msg.GetHopByHopID()).
+		SetEndToEndID(msg.GetEndToEndID()).
+		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
+		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
+		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build())
+
+	if err := msg.ValidateAVP(); err != nil {
+		log.Printf("handleDiameter error for AVP missing: %v", err)
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData(err.Error()).Build())
+		return rspBuilder.Build(), nil
+	}
+
 	cmdCode := msg.GetCommandCode()
 	handler, exists := diameterHandlers[cmdCode]
 	if !exists {
-		log.Printf("Unknown or unhandled command code: %d", cmdCode)
-		response := NewDiameterMsgBuilder().
-			SetCommandCode(cmdCode).
-			SetAppID(msg.GetApplicationID()). // 如果有 AppID
-			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_CommandUnsupported).Build()).
-			Build()
-		return response, fmt.Errorf("%d: %d", ResultCode_CommandUnsupported, cmdCode)
+		log.Printf("unknown or unhandled command code: %d", cmdCode)
+		err := fmt.Errorf("unknown or unhandled command %d: %d", ResultCode_CommandUnsupported, cmdCode)
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData(err.Error()).Build())
+		return rspBuilder.Build(), err
 	}
 	return handler(session, msg)
 }
@@ -130,7 +158,6 @@ func handleDiameter(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 // ///////////////////////////////////////////////////////////////////////////////////////
 
 func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
-	log.Println("Handling CER")
 	// 构造并发送 CEA
 	builder := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()).
@@ -142,7 +169,7 @@ func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
 		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
-		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(VendorIETF).Build()).
+		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
 		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(config.GetAppID(msg.GetCommandCode())).Build())
 
@@ -151,8 +178,6 @@ func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 }
 
 func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
-	log.Println("Handling DWR")
-
 	rsp := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
 		SetAppID(config.GetAppID(msg.GetCommandCode())).
@@ -163,7 +188,7 @@ func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
 		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
-		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(VendorIETF).Build()).
+		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
 		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(config.GetAppID(msg.GetCommandCode())).Build()).
 		Build()
@@ -171,9 +196,7 @@ func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 }
 
 func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
-	log.Println("Handling DPR")
 	// 构造并发送 DPA
-
 	rsp := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
 		SetAppID(config.GetAppID(msg.GetCommandCode())).
@@ -184,7 +207,7 @@ func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
 		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
-		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(VendorIETF).Build()).
+		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
 		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(config.GetAppID(msg.GetCommandCode())).Build()).
 		Build()
@@ -193,7 +216,11 @@ func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 }
 
 func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	// 前面做了检查，这里确保会有，如果没有的话应该修复入口处检查的问题
+	sessionAVP, _ := msg.FindAVPByCode(AVP_SessionId)
+
 	rspBuilder := NewDiameterMsgBuilder().
+		AddAVP(sessionAVP).
 		SetCommandCode(msg.GetCommandCode()).
 		SetAppID(config.GetAppID(msg.GetCommandCode())).
 		SetFlags(FlagResponse).
@@ -202,36 +229,21 @@ func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
 		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build())
-	sessionAVP := msg.FindAVPByCode(AVP_SessionId)
-	if sessionAVP == nil {
-		sessionID := generateSessionID(config.OriginHost)
-		rspBuilder = rspBuilder.
-			AddAVP(NewAVPBuilder(AVP_SessionId, AVPFlag_Mandatory).SetStringData(sessionID).Build()).
-			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
-			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("missing sessionID").Build())
 
-		return rspBuilder.Build(), nil
-	} else {
-		rspBuilder.
-			AddAVP(sessionAVP)
-	}
-	avpUserID := msg.FindAVPByCode(AVP_UserID)
-	avpPassWD := msg.FindAVPByCode(AVP_UserPassword)
-	if avpUserID == nil || avpPassWD == nil {
-		rspBuilder.
-			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
-			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("missing userID or passWD").Build())
-		return rspBuilder.Build(), nil
-	}
+	avpUserID, _ := msg.FindAVPByCode(AVP_UserName)
+	avpPassWD, _ := msg.FindAVPByCode(AVP_UserPassword)
+	//也是一样的入口处检查确保会有这来AVP
 
 	userID := avpUserID.GetIntData()
 	reqPasswd := avpPassWD.GetStringData()
 
 	if passwd, ok := config.UserID2passWD[strconv.Itoa(int(userID))]; ok && reqPasswd == passwd {
-		//验证通过
+		//验证通过，返回令牌
 		rspBuilder.
+			AddAVP(avpUserID).
+			AddAVP(avpPassWD).
 			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
-			AddAVP(NewAVPBuilder(AVP_AuthToken, AVPFlag_Mandatory).SetStringData(config.UserID2OauthToken[strconv.Itoa(int(userID))]).Build())
+			AddAVP(NewAVPBuilder(AVP_EAPPayload, AVPFlag_Mandatory).SetStringData(config.UserID2OauthToken[strconv.Itoa(int(userID))]).Build())
 
 		return rspBuilder.Build(), nil
 	} else {
@@ -252,6 +264,7 @@ type DiameterConfig struct {
 	CommandAppMap     map[string]uint32 `json:"command_app_map"`
 	UserID2passWD     map[string]string `json:"userid_2_password"`
 	UserID2OauthToken map[string]string `json:"userid_2_oauthtoken"`
+	VendorID          uint32            `json:"vendor_id"` // 你可以加这个字段作为默认厂商ID
 }
 
 func (c *DiameterConfig) GetAppID(cmdID uint32) uint32 {
@@ -260,5 +273,3 @@ func (c *DiameterConfig) GetAppID(cmdID uint32) uint32 {
 	// 默认返回0
 	return appID
 }
-
-var config DiameterConfig

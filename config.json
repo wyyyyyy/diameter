@@ -3,7 +3,7 @@
   "origin_realm": "server",
   "host_ip_address": "127.0.0.1",
   "product_name": "SimpleDiameterServer",
-  "auth_application_id": 0,
+  "auth_application_id": 9527,
   "command_app_map": {
     "257": 0,
     "258": 4,
@@ -14,5 +14,6 @@
   },
   "userid_2_oauthtoken": {
     "9527": "sadfljasdlkfjlasdjfkllaksdjf"
-  }
+  },
+  "vendor_id": 9527
 }

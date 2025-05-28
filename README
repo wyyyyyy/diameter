@@ -19,3 +19,142 @@ pgrep freeDiameterd | xargs sudo kill -SIGUSR1
 sudo tcpdump -i lo -s 0 -w "/home/ayyyyya/codes/diameter/diameter_capture_$(date +%Y%m%d_%H%M%S).pcap" 'port 3868 or port 3869'
 
 printf "%d\n" 0x1A
+
+
+
+
+(base) ayyyyya@DESKTOP-MGQK831:~/codes/diameter$ nmap -sT -p 3868 127.0.0.1
+Starting Nmap 7.94SVN ( https://nmap.org ) at 2025-05-28 22:17 CST
+Nmap scan report for localhost (127.0.0.1)
+Host is up (0.00030s latency).
+
+PORT     STATE SERVICE
+3868/tcp open  diameter
+
+Nmap done: 1 IP address (1 host up) scanned in 0.03 seconds
+
+
+ [Diameter] 2025/05/28 23:53:49 Listening on port 3868...
+ [Diameter] 2025/05/28 23:53:55 Accepted connection from 127.0.0.1:58786
+ [Diameter] 2025/05/28 23:53:55 handleDiameter req:
+ Version: 1  Length: 220  Flags: 128  Command: CER(257)  ApplicationId: 0  Hop-by-Hop: 1289114470  End-to-End: 422889529  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: Origin-State-Id(278)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 1748447635
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 172.18.161.120
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+AVP: Product-Name(269)  AVP-Flags: 0  AVP-Length: 20  AVP-Value: freeDiameter
+AVP: Firmware-Revision(267)  AVP-Flags: 0  AVP-Length: 12  AVP-Value: 10600
+AVP: (299)  AVP-Flags: 64  AVP-Length: 12  
+AVP: Vendor-Specific-Application-Id(260)  AVP-Flags: 64  AVP-Length: 32  
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 4294967295
+AVP: Supported-Vendor-Id(265)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 5535
+AVP: Supported-Vendor-Id(265)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Supported-Vendor-Id(265)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 10415
+
+[Diameter] 2025/05/28 23:53:55 handleDiameter rsp:
+ Version: 1  Length: 136  Flags: 0  Command: CER(257)  ApplicationId: 0  Hop-by-Hop: 1289114470  End-to-End: 422889529  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+
+[Diameter] 2025/05/28 23:54:27 handleDiameter req:
+ Version: 1  Length: 68  Flags: 128  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114471  End-to-End: 422889530  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: Origin-State-Id(278)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 1748447635
+
+[Diameter] 2025/05/28 23:54:27 handleDiameter rsp:
+ Version: 1  Length: 136  Flags: 0  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114471  End-to-End: 422889530  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+
+[Diameter] 2025/05/28 23:54:57 handleDiameter req:
+ Version: 1  Length: 68  Flags: 128  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114472  End-to-End: 422889531  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: Origin-State-Id(278)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 1748447635
+
+[Diameter] 2025/05/28 23:54:57 handleDiameter rsp:
+ Version: 1  Length: 136  Flags: 0  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114472  End-to-End: 422889531  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+
+[Diameter] 2025/05/28 23:55:26 handleDiameter req:
+ Version: 1  Length: 68  Flags: 128  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114473  End-to-End: 422889532  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: Origin-State-Id(278)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 1748447635
+
+[Diameter] 2025/05/28 23:55:26 handleDiameter rsp:
+ Version: 1  Length: 136  Flags: 0  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114473  End-to-End: 422889532  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+
+[Diameter] 2025/05/28 23:55:57 handleDiameter req:
+ Version: 1  Length: 68  Flags: 128  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114474  End-to-End: 422889533  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: Origin-State-Id(278)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 1748447635
+
+[Diameter] 2025/05/28 23:55:57 handleDiameter rsp:
+ Version: 1  Length: 136  Flags: 0  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114474  End-to-End: 422889533  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+
+ [Diameter] 2025/05/28 23:56:26 handleDiameter req:
+ Version: 1  Length: 68  Flags: 128  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114475  End-to-End: 422889534  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: Origin-State-Id(278)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 1748447635
+
+[Diameter] 2025/05/28 23:56:26 handleDiameter rsp:
+ Version: 1  Length: 136  Flags: 0  Command: DWR(280)  ApplicationId: 0  Hop-by-Hop: 1289114475  End-to-End: 422889534  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+
+[Diameter] 2025/05/28 23:57:17 handleDiameter req:
+ Version: 1  Length: 68  Flags: 128  Command: DPR(282)  ApplicationId: 0  Hop-by-Hop: 1289114478  End-to-End: 422889537  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: (273)  AVP-Flags: 64  AVP-Length: 12  
+
+ [Diameter] 2025/05/28 23:57:17 handleDiameter rsp:
+ Version: 1  Length: 136  Flags: 0  Command: DPR(282)  ApplicationId: 0  Hop-by-Hop: 1289114478  End-to-End: 422889537  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
+AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
+AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
+

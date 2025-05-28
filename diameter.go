@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -15,8 +16,13 @@ func init() {
 	if err != nil {
 		log.Fatalf("Load config failed: %v", err)
 	}
+	diameterDict, err = LoadDiameterMetaDictFromFile("dict.json")
+	if err != nil {
+		panic(err)
+	}
 }
 
+var diameterDict *DiameterMetaDict
 var config DiameterConfig
 
 func LoadConfig(path string) error {
@@ -41,20 +47,19 @@ type DiameterMsgBuilder struct {
 const (
 	FlagRequest  = 0x80
 	FlagResponse = 0x00
-	VendorIETF   = 0
 )
 
 type DiameterHandler func(session *Session, msg *DiameterMsg) (*DiameterMsg, error)
 
 const (
-	Cmd_CE   uint32 = 257      // Capabilities Exchange (CER/CEA)
-	Cmd_DW   uint32 = 280      // Device Watchdog (DWR/DWA)
-	Cmd_DP   uint32 = 282      // Disconnect Peer (DPR/DPA)
-	Cmd_AC   uint32 = 265      // Accounting (ACR/ACA)
-	Cmd_RA   uint32 = 258      // Re-Auth (RAR/RAA)
-	Cmd_AS   uint32 = 274      // Abort Session (ASR/ASA)
-	Cmd_CC   uint32 = 272      // Credit Control (CCR/CCA)
-	Cmd_TEST uint32 = 16777051 // Credit Control (CCR/CCA)
+	Cmd_CE   uint32 = 257    // Capabilities Exchange (CER/CEA)
+	Cmd_DW   uint32 = 280    // Device Watchdog (DWR/DWA)
+	Cmd_DP   uint32 = 282    // Disconnect Peer (DPR/DPA)
+	Cmd_AC   uint32 = 265    // Accounting (ACR/ACA)
+	Cmd_RA   uint32 = 258    // Re-Auth (RAR/RAA)
+	Cmd_AS   uint32 = 274    // Abort Session (ASR/ASA)
+	Cmd_CC   uint32 = 272    // Credit Control (CCR/CCA)
+	Cmd_TEST uint32 = 234567 // Credit Control (CCR/CCA)
 )
 const (
 	// 成功类
@@ -147,19 +152,35 @@ type DiameterMsg struct {
 	body []*AVPMsg
 }
 
+func (m *DiameterMsg) toString() string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Version: %v  ", m.GetVersion())
+	fmt.Fprintf(&sb, "Length: %v  ", m.GetMessageLength())
+	fmt.Fprintf(&sb, "Flags: %v  ", m.GetFlags())
+	commmandMeta := diameterDict.Commands[m.GetCommandCode()]
+	fmt.Fprintf(&sb, "Command: %v(%v)  ", commmandMeta.Name, m.GetCommandCode())
+	fmt.Fprintf(&sb, "ApplicationId: %v  ", m.GetApplicationID())
+	fmt.Fprintf(&sb, "Hop-by-Hop: %v  ", m.GetHopByHopID())
+	fmt.Fprintf(&sb, "End-to-End: %v  \n", m.GetEndToEndID())
+	for _, avgMsg := range m.body {
+		fmt.Fprintf(&sb, "%v\n", avgMsg.ToString())
+	}
+	return sb.String()
+}
+
 func generateSessionID(originHost string) string {
 	now := time.Now()
 	pid := os.Getpid()
 	return fmt.Sprintf("%s;%d.%09d;%d", originHost, now.Unix(), now.Nanosecond(), pid)
 }
 
-func (m *DiameterMsg) FindAVPByCode(code uint32) *AVPMsg {
-	for _, avp := range m.body {
+func (m *DiameterMsg) FindAVPByCode(code uint32) (*AVPMsg, int) {
+	for i, avp := range m.body {
 		if avp.GetCode() == code {
-			return avp
+			return avp, i
 		}
 	}
-	return nil
+	return nil, -1
 }
 
 func (m *DiameterMsg) FindAVPsByCode(code uint32) []*AVPMsg {
@@ -185,9 +206,35 @@ func (d *DiameterMsg) Validate() error {
 	if d.head[4]&FlagRequest == 0 {
 		return fmt.Errorf("not a request message (R-bit not set)")
 	}
+	return nil
+}
 
-	// 检查该带的AVP是不是都带了
+// Validate 验证Diameter头部是否合法
+func (d *DiameterMsg) ValidateAVP() error {
 
+	// 检查该带的AVP是不是都带了，带多了没关系
+	commandMeta, ok := diameterDict.Commands[d.GetCommandCode()]
+	if !ok {
+		return fmt.Errorf("command Not support")
+	}
+	for _, AVPCodes := range commandMeta.AVPCodes {
+		atLeast1 := false
+		for _, code := range AVPCodes {
+			// avpMeta := diameterDict.AVPs[code]
+			if avp, _ := d.FindAVPByCode(code); avp != nil {
+				// 算了，不校验顺序了
+				// if avpMeta.FixPos > 0 && avpMeta.FixPos != uint32(idx)+1 {
+				// 	// 有固定位置且位置不对的，直接返回error
+				// 	return fmt.Errorf("AVP was not in its fixed position %v actualPos %v needPos %v", code, idx+1, avpMeta.FixPos)
+				// }
+				atLeast1 = true
+				break
+			}
+		}
+		if !atLeast1 {
+			return fmt.Errorf("miss avp, need at least 1 %v", AVPCodes)
+		}
+	}
 	return nil
 }
 
@@ -249,4 +296,63 @@ func (msg *DiameterMsg) ToBytes() []byte {
 		offset += avp.GetTotalLen()
 	}
 	return buf
+}
+
+///////////////////////////////////////////////////////////////////////////////////////
+
+type AVPMeta struct {
+	Name   string `json:"name"`
+	Code   uint32 `json:"code"`
+	Type   string `json:"type"`
+	FixPos uint32 `json:"fixPos"` // 新增字段，0 表示无固定位置
+}
+
+type CommandMeta struct {
+	Name          string     `json:"name"`
+	Code          uint32     `json:"code"`
+	Request       bool       `json:"request"`
+	ApplicationId uint32     `json:"application_id"`
+	AVPCodes      [][]uint32 `json:"avps"` // 二维数组，子数组里至少有一个avp满足
+}
+
+type DiameterMetaDict struct {
+	Commands map[uint32]CommandMeta `json:"commands"`
+	AVPs     map[uint32]AVPMeta     `json:"avps"`
+}
+
+// 临时结构体，用于 JSON 反序列化（Command 里 AVPs 是二维数组）
+// 因为JSON的map key只能是string，所以先用slice，后面转换为map
+type diameterMetaDictRaw struct {
+	Commands []CommandMeta `json:"commands"`
+	AVPs     []AVPMeta     `json:"avps"`
+}
+
+// LoadDiameterMetaDictFromFile 从文件加载并转换成 DiameterMetaDict
+func LoadDiameterMetaDictFromFile(filename string) (*DiameterMetaDict, error) {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("read file error: %w", err)
+	}
+
+	var raw diameterMetaDictRaw
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("json unmarshal error: %w", err)
+	}
+
+	dict := &DiameterMetaDict{
+		Commands: make(map[uint32]CommandMeta),
+		AVPs:     make(map[uint32]AVPMeta),
+	}
+
+	// AVP 转 map[code]AVPMeta
+	for _, avp := range raw.AVPs {
+		dict.AVPs[avp.Code] = avp
+	}
+
+	// Command 转 map[code]CommandMeta
+	for _, cmd := range raw.Commands {
+		dict.Commands[cmd.Code] = cmd
+	}
+
+	return dict, nil
 }

@@ -2,10 +2,9 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
+	"strings"
 	"time"
 )
 
@@ -54,7 +53,7 @@ const (
 	AVP_FirmwareRevision      = 267
 	AVP_Drmp                  = 278
 	AVP_UserID                = 16777052
-	AVP_AuthToken             = 16777055
+	AVP_EAPPayload            = 462
 	// ...根据需要继续添加
 )
 
@@ -280,7 +279,6 @@ func (a *AVPMsg) Validate() error {
 	if a.HasVendorID() && length < 12 {
 		return fmt.Errorf("invalid AVP length %d, with Vendor-ID must be >= 12", length)
 	}
-	// 你可以添加更多规则，比如Flags中保留位检查等
 	return nil
 }
 func (avp *AVPMsg) ToBytes() []byte {
@@ -290,55 +288,19 @@ func (avp *AVPMsg) ToBytes() []byte {
 	return buf
 }
 
-type AVPMeta struct {
-	Name string `json:"name"`
-	Code uint32 `json:"code"`
-	Type string `json:"type"`
-}
-
-type CommandMeta struct {
-	Name          string   `json:"name"`
-	Code          uint32   `json:"code"`
-	Request       bool     `json:"request"`
-	ApplicationID uint32   `json:"application_id"`
-	AVPCodes      []uint32 `json:"avps"`
-}
-
-type Dictionary struct {
-	Commands []CommandMeta `json:"commands"`
-	AVPs     []AVPMeta     `json:"avps"`
-}
-
-var (
-	AVPDict     = map[uint32]AVPMeta{}
-	CommandDict = map[uint32]CommandMeta{} // key: code<<1 | btoi(request)
-)
-
-func btoi(b bool) uint32 {
-	if b {
-		return 1
+func (avp *AVPMsg) ToString() string {
+	var sb strings.Builder
+	avpMeta := diameterDict.AVPs[avp.GetCode()]
+	fmt.Fprintf(&sb, "AVP: %v(%v)  ", avpMeta.Name, avp.GetCode())
+	fmt.Fprintf(&sb, "AVP-Flags: %v  ", avp.GetFlags())
+	fmt.Fprintf(&sb, "AVP-Length: %v  ", avp.GetLength())
+	typeStr := avpMeta.Type
+	if typeStr == "UTF8String" || typeStr == "DiameterIdentity" {
+		fmt.Fprintf(&sb, "AVP-Value: %v", avp.GetStringData())
+	} else if typeStr == "Unsigned32" {
+		fmt.Fprintf(&sb, "AVP-Value: %v", avp.GetIntData())
+	} else if typeStr == "Address" {
+		fmt.Fprintf(&sb, "AVP-Value: %v", avp.GetIPAddrData())
 	}
-	return 0
-}
-
-func loadDictionaryOrPanic(filename string) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		panic(fmt.Sprintf("failed to read dictionary.json: %v", err))
-	}
-	var dict Dictionary
-	if err := json.Unmarshal(data, &dict); err != nil {
-		panic(fmt.Sprintf("failed to parse dictionary.json: %v", err))
-	}
-	for _, avp := range dict.AVPs {
-		AVPDict[avp.Code] = avp
-	}
-	for _, cmd := range dict.Commands {
-		key := (cmd.Code << 1) | btoi(cmd.Request)
-		CommandDict[key] = cmd
-	}
-}
-
-func init() {
-	loadDictionaryOrPanic("dict.json")
+	return sb.String()
 }
