@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"time"
 )
@@ -15,6 +16,16 @@ func main() {
 	port := flag.Int("p", 3868, "port to listen on")
 	flag.Parse()
 	log.SetPrefix(" [Diameter] ")
+
+	// 设置日志输出到文件
+	f, err := os.OpenFile("diameter.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatalf("打开日志文件失败: %v", err)
+	}
+	defer f.Close()
+	log.SetOutput(f)
+
+	// 开始监听
 	addr := fmt.Sprintf(":%d", *port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -45,6 +56,7 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	defer log.Printf("Closed Connection from %v", conn.RemoteAddr())
 	log.Printf("Accepted connection from %v", conn.RemoteAddr())
+	// 目前用不到，类似挑战-验证这种二阶段的认证需要用到。
 	session := &Session{}
 	for {
 		var diameterMsg DiameterMsg
@@ -126,7 +138,7 @@ func handleDiameter(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	rspBuilder := NewDiameterMsgBuilder().
 		AddAVP(sessionAVP).
 		SetCommandCode(msg.GetCommandCode()).
-		SetAppID(config.GetAppID(msg.GetCommandCode())).
+		SetAppID(msg.GetApplicationID()).
 		SetFlags(FlagResponse).
 		SetHopByHopID(msg.GetHopByHopID()).
 		SetEndToEndID(msg.GetEndToEndID()).
@@ -161,7 +173,7 @@ func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	// 构造并发送 CEA
 	builder := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()).
-		SetAppID(config.GetAppID(msg.GetCommandCode())).
+		SetAppID(msg.GetApplicationID()).
 		SetHopByHopID(msg.GetHopByHopID()).
 		SetEndToEndID(msg.GetEndToEndID()).
 		SetFlags(FlagResponse).
@@ -171,7 +183,7 @@ func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
 		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
-		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(config.GetAppID(msg.GetCommandCode())).Build())
+		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build())
 
 	// 4. 构建消息（自动算总长）
 	return builder.Build(), nil
@@ -180,7 +192,7 @@ func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	rsp := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
-		SetAppID(config.GetAppID(msg.GetCommandCode())).
+		SetAppID(msg.GetApplicationID()).
 		SetFlags(FlagResponse).             // R标志，响应消息
 		SetHopByHopID(msg.GetHopByHopID()). // 保持请求一致
 		SetEndToEndID(msg.GetEndToEndID()).
@@ -190,7 +202,7 @@ func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
 		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
-		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(config.GetAppID(msg.GetCommandCode())).Build()).
+		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build()).
 		Build()
 	return rsp, nil
 }
@@ -199,7 +211,7 @@ func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	// 构造并发送 DPA
 	rsp := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
-		SetAppID(config.GetAppID(msg.GetCommandCode())).
+		SetAppID(msg.GetApplicationID()).
 		SetFlags(FlagResponse).
 		SetHopByHopID(msg.GetHopByHopID()). // 保持请求一致
 		SetEndToEndID(msg.GetEndToEndID()).
@@ -209,7 +221,7 @@ func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
 		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
-		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(config.GetAppID(msg.GetCommandCode())).Build()).
+		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build()).
 		Build()
 	session.needClose = true
 	return rsp, nil
@@ -222,7 +234,7 @@ func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	rspBuilder := NewDiameterMsgBuilder().
 		AddAVP(sessionAVP).
 		SetCommandCode(msg.GetCommandCode()).
-		SetAppID(config.GetAppID(msg.GetCommandCode())).
+		SetAppID(msg.GetApplicationID()).
 		SetFlags(FlagResponse).
 		SetHopByHopID(msg.GetHopByHopID()).
 		SetEndToEndID(msg.GetEndToEndID()).
@@ -233,15 +245,15 @@ func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	avpUserID, _ := msg.FindAVPByCode(AVP_UserName)
 	avpPassWD, _ := msg.FindAVPByCode(AVP_UserPassword)
 	//也是一样的入口处检查确保会有这来AVP
-
 	userID := avpUserID.GetIntData()
 	reqPasswd := avpPassWD.GetStringData()
+	rspBuilder.
+		AddAVP(avpUserID).
+		AddAVP(avpPassWD)
 
 	if passwd, ok := config.UserID2passWD[strconv.Itoa(int(userID))]; ok && reqPasswd == passwd {
 		//验证通过，返回令牌
 		rspBuilder.
-			AddAVP(avpUserID).
-			AddAVP(avpPassWD).
 			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
 			AddAVP(NewAVPBuilder(AVP_EAPPayload, AVPFlag_Mandatory).SetStringData(config.UserID2OauthToken[strconv.Itoa(int(userID))]).Build())
 
@@ -265,6 +277,7 @@ type DiameterConfig struct {
 	UserID2passWD     map[string]string `json:"userid_2_password"`
 	UserID2OauthToken map[string]string `json:"userid_2_oauthtoken"`
 	VendorID          uint32            `json:"vendor_id"` // 你可以加这个字段作为默认厂商ID
+	AuthApplicationId uint32            `json:"auth_application_id"`
 }
 
 func (c *DiameterConfig) GetAppID(cmdID uint32) uint32 {

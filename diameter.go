@@ -232,7 +232,7 @@ func (d *DiameterMsg) ValidateAVP() error {
 			}
 		}
 		if !atLeast1 {
-			return fmt.Errorf("miss avp, need at least 1 %v", AVPCodes)
+			return fmt.Errorf("miss avp, need one of %v", AVPCodes)
 		}
 	}
 	return nil

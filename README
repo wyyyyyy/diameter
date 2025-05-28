@@ -158,3 +158,49 @@ AVP: Vendor-Id(266)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 9527
 AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameterServer
 AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
 
+
+ [Diameter] 2025/05/29 00:01:15 handleDiameter req:
+ Version: 1  Length: 172  Flags: 192  Command: TESTR(234567)  ApplicationId: 9527  Hop-by-Hop: 744419931  End-to-End: 867408510  
+AVP: Session-Id(263)  AVP-Flags: 64  AVP-Length: 42  AVP-Value: client.local;1748448059;1;app_test
+AVP: (283)  AVP-Flags: 64  AVP-Length: 14  
+AVP: (293)  AVP-Flags: 64  AVP-Length: 20  
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
+AVP: (1)  AVP-Flags: 128  AVP-Length: 16  
+AVP: (2)  AVP-Flags: 128  AVP-Length: 20  
+
+[Diameter] 2025/05/29 00:01:15 handleDiameter rsp:
+ Version: 1  Length: 200  Flags: 0  Command: TESTR(234567)  ApplicationId: 0  Hop-by-Hop: 744419931  End-to-End: 867408510  
+AVP: Session-Id(263)  AVP-Flags: 64  AVP-Length: 42  AVP-Value: client.local;1748448059;1;app_test
+AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
+AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
+AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
+AVP: (1)  AVP-Flags: 128  AVP-Length: 16  
+AVP: (2)  AVP-Flags: 128  AVP-Length: 20  
+AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
+AVP: (462)  AVP-Flags: 64  AVP-Length: 36  
+
+
+
+
+00:45:24  ERROR  Conflicting rule: the number of occurrences (0) is < the rule min (1) for 'Test-AVP'.
+00:45:24  ERROR  ERROR: in '((fd_dict_iterate_rules ( model, &data, parserules_check_one_rule )))' :    Bad message
+00:45:24  ERROR  Parsing error: 'DIAMETER_MISSING_AVP' for the following message received from 'server.local':
+00:45:24  ERROR     'Test-Answer'
+00:45:24  ERROR       Version: 0x01
+00:45:24  ERROR       Length: 164
+00:45:24  ERROR       Flags: 0x00 (----)
+00:45:24  ERROR       Command Code: 234567
+00:45:24  ERROR       ApplicationId: 9527
+00:45:24  ERROR       Hop-by-Hop Identifier: 0x0464EDD6
+00:45:24  ERROR       End-to-End Identifier: 0xD9A87CB8
+00:45:24  ERROR        {internal data}: src:server.local(12) rwb:(nil) rt:1 cb:(nil),(nil)((nil)) qry:0x764eb0000b90 asso:0 sess:(nil)
+00:45:24  ERROR        AVP: 'Session-Id'(263) l=42 f=-M val="client.local;1748450714;1;app_test"
+00:45:24  ERROR        AVP: 'Origin-Host'(264) l=20 f=-M val="server.local"
+00:45:24  ERROR        AVP: 'Origin-Realm'(296) l=14 f=-M val="server"
+00:45:24  ERROR        AVP: 'Host-IP-Address'(257) l=14 f=-M val=127.0.0.1
+00:45:24  ERROR        AVP: 'Result-Code'(268) l=12 f=-M val='DIAMETER_MISSING_AVP' (5005 (0x138d))
+00:45:24  ERROR        AVP: 'Error-Message'(281) l=33 f=-M val="miss avp, need one of [1]"
+00:45:24  ERROR        AVP: 'Route-Record'(282) l=8 f=-M val="server.local"
+00:45:24  ERROR  ERROR: in '(fd_msg_parse_or_error( &msgptr, &error ))' :       Bad message
+RECV no_Test-AVP Status: 5005 From 'server.local' ('server') in 0.001328 sec
