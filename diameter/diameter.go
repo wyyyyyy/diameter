@@ -1,4 +1,4 @@
-package main
+package diameter
 
 import (
 	"encoding/binary"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -49,7 +50,7 @@ type DiameterConfig struct {
 	CommandAppMap     map[string]uint32 `json:"command_app_map"`
 	UserID2passWD     map[string]string `json:"userid_2_password"`
 	UserID2OauthToken map[string]string `json:"userid_2_oauthtoken"`
-	VendorID          uint32            `json:"vendor_id"` // 你可以加这个字段作为默认厂商ID
+	VendorID          uint32            `json:"vendor_id"`
 	AuthApplicationId uint32            `json:"auth_application_id"`
 }
 
@@ -109,6 +110,142 @@ var diameterHandlers = map[uint32]DiameterHandler{
 	Cmd_DW:   handleDWR,  // Device-Watchdog-Request
 	Cmd_DP:   handleDPR,  // Disconnect-Peer-Request
 	Cmd_TEST: handleTest, // 测试认证
+}
+
+func handleDiameter(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	sessionAVP, _ := msg.FindAVPByCode(AVP_SessionId)
+	if sessionAVP == nil {
+		sessionAVP = NewAVPBuilder(AVP_SessionId, AVPFlag_Mandatory).SetStringData(generateSessionID(config.OriginHost)).Build()
+	}
+	rspBuilder := NewDiameterMsgBuilder().
+		AddAVP(sessionAVP).
+		SetCommandCode(msg.GetCommandCode()).
+		SetAppID(msg.GetApplicationID()).
+		SetFlags(FlagResponse).
+		SetHopByHopID(msg.GetHopByHopID()).
+		SetEndToEndID(msg.GetEndToEndID()).
+		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
+		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
+		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build())
+
+	if err := msg.ValidateAVP(); err != nil {
+		log.Printf("handleDiameter error for AVP missing: %v", err)
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData(err.Error()).Build())
+		return rspBuilder.Build(), nil
+	}
+
+	cmdCode := msg.GetCommandCode()
+	handler, exists := diameterHandlers[cmdCode]
+	if !exists {
+		log.Printf("unknown or unhandled command code: %d", cmdCode)
+		err := fmt.Errorf("unknown or unhandled command %d: %d", ResultCode_CommandUnsupported, cmdCode)
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_MissingAVP).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData(err.Error()).Build())
+		return rspBuilder.Build(), err
+	}
+	return handler(session, msg)
+}
+
+// ///////////////////////////////////////////////////////////////////////////////////////
+
+func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	// 构造并发送 CEA
+	builder := NewDiameterMsgBuilder().
+		SetCommandCode(msg.GetCommandCode()).
+		SetAppID(msg.GetApplicationID()).
+		SetHopByHopID(msg.GetHopByHopID()).
+		SetEndToEndID(msg.GetEndToEndID()).
+		SetFlags(FlagResponse).
+		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
+		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
+		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
+		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
+		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
+		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
+		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build())
+
+	// 4. 构建消息（自动算总长）
+	return builder.Build(), nil
+}
+
+func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	rsp := NewDiameterMsgBuilder().
+		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
+		SetAppID(msg.GetApplicationID()).
+		SetFlags(FlagResponse).             // R标志，响应消息
+		SetHopByHopID(msg.GetHopByHopID()). // 保持请求一致
+		SetEndToEndID(msg.GetEndToEndID()).
+		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
+		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
+		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
+		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
+		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
+		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
+		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build()).
+		Build()
+	return rsp, nil
+}
+
+func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	// 构造并发送 DPA
+	rsp := NewDiameterMsgBuilder().
+		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
+		SetAppID(msg.GetApplicationID()).
+		SetFlags(FlagResponse).
+		SetHopByHopID(msg.GetHopByHopID()). // 保持请求一致
+		SetEndToEndID(msg.GetEndToEndID()).
+		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
+		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
+		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
+		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
+		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
+		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
+		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build()).
+		Build()
+	session.needClose = true
+	return rsp, nil
+}
+
+func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	// 前面做了检查，这里确保会有，如果没有的话应该修复入口处检查的问题
+	sessionAVP, _ := msg.FindAVPByCode(AVP_SessionId)
+
+	rspBuilder := NewDiameterMsgBuilder().
+		AddAVP(sessionAVP).
+		SetCommandCode(msg.GetCommandCode()).
+		SetAppID(msg.GetApplicationID()).
+		SetFlags(FlagResponse).
+		SetHopByHopID(msg.GetHopByHopID()).
+		SetEndToEndID(msg.GetEndToEndID()).
+		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
+		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
+		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build())
+
+	avpUserID, _ := msg.FindAVPByCode(AVP_UserName)
+	avpPassWD, _ := msg.FindAVPByCode(AVP_UserPassword)
+	//也是一样的入口处检查确保会有这来AVP
+	userID := avpUserID.GetIntData()
+	reqPasswd := avpPassWD.GetStringData()
+	rspBuilder.
+		AddAVP(avpUserID).
+		AddAVP(avpPassWD)
+
+	if passwd, ok := config.UserID2passWD[strconv.Itoa(int(userID))]; ok && reqPasswd == passwd {
+		//验证通过，返回令牌
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
+			AddAVP(NewAVPBuilder(AVP_EAPPayload, AVPFlag_Mandatory).SetStringData(config.UserID2OauthToken[strconv.Itoa(int(userID))]).Build())
+
+		return rspBuilder.Build(), nil
+	} else {
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_AuthenticationRejected).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("userID or passWD wrong").Build())
+		return rspBuilder.Build(), nil
+	}
 }
 
 func NewDiameterMsgBuilder() *DiameterMsgBuilder {
