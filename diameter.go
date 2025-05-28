@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -38,6 +39,25 @@ func LoadConfig(path string) error {
 	}
 
 	return json.Unmarshal(bytes, &config)
+}
+
+type DiameterConfig struct {
+	OriginHost        string            `json:"origin_host"`
+	OriginRealm       string            `json:"origin_realm"`
+	HostIPAddress     string            `json:"host_ip_address"`
+	ProductName       string            `json:"product_name"`
+	CommandAppMap     map[string]uint32 `json:"command_app_map"`
+	UserID2passWD     map[string]string `json:"userid_2_password"`
+	UserID2OauthToken map[string]string `json:"userid_2_oauthtoken"`
+	VendorID          uint32            `json:"vendor_id"` // 你可以加这个字段作为默认厂商ID
+	AuthApplicationId uint32            `json:"auth_application_id"`
+}
+
+func (c *DiameterConfig) GetAppID(cmdID uint32) uint32 {
+	key := strconv.FormatUint(uint64(cmdID), 10) // uint32转string
+	appID := c.CommandAppMap[key]
+	// 默认返回0
+	return appID
 }
 
 type DiameterMsgBuilder struct {
