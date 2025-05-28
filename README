@@ -1,0 +1,21 @@
+1.先关闭TLS，起两个freeDiameter服务，确保正常运行交互。
+2.用自己开发的服务端替换其中一个
+
+ncat 模拟慢速连接：
+
+./freeDiameterd -c fd-peer1.conf -dd 
+./freeDiameterd -c fd-peer2.conf -dd 
+
+# 编译freediameter插件
+cd build
+rm -rf *
+cmake ..
+make
+
+
+pgrep freeDiameterd | xargs sudo kill -SIGUSR1
+
+./freeDiameter/build/freeDiameterd/freeDiameterd -c fd-client2.conf -dd
+
+
+sudo tcpdump -i lo -s 0 -w "/home/ayyyyya/codes/diameter/diameter_capture_$(date +%Y%m%d_%H%M%S).pcap" 'port 3868 or port 3869'

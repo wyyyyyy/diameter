@@ -1,0 +1,47 @@
+{
+  "commands": [
+    {
+      "name": "CER",
+      "code": 257,
+      "request": true,
+      "application_id": 0,
+      "avps": [264, 296, 257, 266, 269, 278, 265, 258, 259, 260, 267]
+    },
+    {
+      "name": "CEA",
+      "code": 257,
+      "request": false,
+      "application_id": 0,
+      "avps": [268, 264, 296, 257, 266, 269, 278, 265, 258, 259, 260, 267, 281]
+    },
+    {
+      "name": "DWR",
+      "code": 280,
+      "request": true,
+      "application_id": 0,
+      "avps": [264, 296, 278]
+    },
+    {
+      "name": "DWA",
+      "code": 280,
+      "request": false,
+      "application_id": 0,
+      "avps": [268, 264, 296, 281]
+    }
+  ],
+  "avps": [
+    { "name": "Origin-Host", "code": 264, "type": "DiameterIdentity" },
+    { "name": "Origin-Realm", "code": 296, "type": "DiameterIdentity" },
+    { "name": "Host-IP-Address", "code": 257, "type": "Address" },
+    { "name": "Vendor-Id", "code": 266, "type": "Unsigned32" },
+    { "name": "Product-Name", "code": 269, "type": "UTF8String" },
+    { "name": "Origin-State-Id", "code": 278, "type": "Unsigned32" },
+    { "name": "Supported-Vendor-Id", "code": 265, "type": "Unsigned32" },
+    { "name": "Auth-Application-Id", "code": 258, "type": "Unsigned32" },
+    { "name": "Acct-Application-Id", "code": 259, "type": "Unsigned32" },
+    { "name": "Vendor-Specific-Application-Id", "code": 260, "type": "Grouped" },
+    { "name": "Firmware-Revision", "code": 267, "type": "Unsigned32" },
+    { "name": "Result-Code", "code": 268, "type": "Unsigned32" },
+    { "name": "Error-Message", "code": 281, "type": "UTF8String" }
+  ]
+}

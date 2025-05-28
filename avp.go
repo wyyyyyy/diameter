@@ -1,5 +1,12 @@
 package main
 
+import (
+	"encoding/binary"
+	"fmt"
+	"net"
+	"time"
+)
+
 const (
 	AVP_UserName              = 1
 	AVP_UserPassword          = 2
@@ -46,3 +53,182 @@ const (
 	AVP_Drmp                  = 278
 	// ...根据需要继续添加
 )
+
+const (
+	AVPFlag_VendorSpecific byte = 0x80 // Vendor-Specific flag
+	AVPFlag_Mandatory      byte = 0x40 // Mandatory flag
+	AVPFlag_Protected      byte = 0x20 // Protected flag
+)
+
+type AVPBuilder struct {
+	code  uint32
+	flags byte
+	other []byte
+}
+
+func NewAVPBuilder(code uint32, flags byte) *AVPBuilder {
+	var other []byte
+	if flags&0x80 != 0 {
+		other = make([]byte, 4) // Reserve 4 bytes for Vendor-ID
+	} else {
+		other = make([]byte, 0)
+	}
+	return &AVPBuilder{
+		code:  code,
+		flags: flags,
+		other: other,
+	}
+}
+
+func (b *AVPBuilder) SetVendorID(id uint32) *AVPBuilder {
+	if b.flags&0x80 == 0 {
+		panic("SetVendorID called, but V-bit not set in flags")
+	}
+	binary.BigEndian.PutUint32(b.other[0:4], id)
+	return b
+}
+
+func (b *AVPBuilder) SetData(data []byte) *AVPBuilder {
+	offset := 0
+	if b.flags&0x80 != 0 {
+		offset = 4
+	}
+	// 重置 other 为前缀 + 数据
+	newOther := make([]byte, offset+len(data))
+	copy(newOther, b.other[:offset])
+	copy(newOther[offset:], data)
+	b.other = newOther
+	return b
+}
+
+func (b *AVPBuilder) Build() *AVPMsg {
+	// 构造 AVP 头部：Code (4 bytes), Flags + Length (3 bytes), Reserved (1 byte)
+	var head [8]byte
+	binary.BigEndian.PutUint32(head[0:4], b.code)
+
+	length := 8 + len(b.other)
+	head[4] = b.flags
+	head[5] = byte((length >> 16) & 0xFF)
+	head[6] = byte((length >> 8) & 0xFF)
+	head[7] = byte(length & 0xFF)
+
+	// 补齐 padding 到 4 字节
+	padded := b.other
+	if rem := length % 4; rem != 0 {
+		pad := make([]byte, 4-rem)
+		padded = append(padded, pad...)
+	}
+
+	return &AVPMsg{
+		head:  head,
+		other: padded,
+	}
+}
+
+func (b *AVPBuilder) SetStringData(s string) *AVPBuilder {
+	b.SetData([]byte(s))
+	return b
+}
+
+func (b *AVPBuilder) SetIntData(i uint32) *AVPBuilder {
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, i)
+	b.SetData(buf)
+	return b
+}
+
+func (b *AVPBuilder) SetIpData(ip net.IP) *AVPBuilder {
+	b.SetData(append([]byte{0x00, 0x01}, ip.To4()...)) // 只支持IPv4，或者根据长度判断IPv6
+	return b
+}
+
+func (b *AVPBuilder) SetTimeData(t time.Time) *AVPBuilder {
+	buf := make([]byte, 4)
+	// Diameter时间戳一般是秒数，取Unix时间戳即可
+	binary.BigEndian.PutUint32(buf, uint32(t.Unix()))
+	b.SetData(buf)
+	return b
+}
+
+func GetStringData(data []byte) string {
+	return string(data)
+}
+
+func GetIntData(data []byte) uint32 {
+	if len(data) < 4 {
+		return 0
+	}
+	return binary.BigEndian.Uint32(data)
+}
+
+func GetIpData(data []byte) net.IP {
+	if len(data) < 6 {
+		return nil
+	}
+	// 跳过前缀两字节（如 0x0001 表示 IPv4）
+	return net.IP(data[2:6])
+}
+
+func GetTimeData(data []byte) time.Time {
+	if len(data) < 4 {
+		return time.Time{}
+	}
+	sec := binary.BigEndian.Uint32(data)
+	return time.Unix(int64(sec), 0)
+}
+
+// ///////////////////////////////////////////////////////////////////////////////////////
+type AVPMsg struct {
+	head  [8]byte
+	other []byte
+}
+
+// 获取 AVP Code（4 字节）
+func (a *AVPMsg) GetCode() uint32 {
+	return uint32(a.head[0])<<24 | uint32(a.head[1])<<16 | uint32(a.head[2])<<8 | uint32(a.head[3])
+}
+
+// 获取 Flags（1 字节）
+func (a *AVPMsg) GetFlags() uint8 {
+	return a.head[4]
+}
+
+// 获取 AVP Length（3 字节）
+func (a *AVPMsg) GetLength() uint32 {
+	return uint32(a.head[5])<<16 | uint32(a.head[6])<<8 | uint32(a.head[7])
+}
+
+func (a *AVPMsg) HasVendorID() bool {
+	return a.head[4]&0x80 != 0
+}
+
+// 返回 AVP 除去 header（header不包含vendor-id）外剩下的长度，包括 vendor-id + data + padding
+func (a *AVPMsg) GetOtherLen() int {
+	totalLen := int(a.GetLength())
+	headerLen := 8
+	padding := (4 - (totalLen % 4)) % 4
+	return totalLen - headerLen + padding
+}
+
+func (a *AVPMsg) GetTotalLen() int {
+	return a.GetOtherLen() + len(a.head)
+}
+
+// Validate 校验AVP头是否合法
+func (a *AVPMsg) Validate() error {
+	length := a.GetLength()
+	if length < 8 {
+		return fmt.Errorf("invalid AVP length %d, must be >= 8", length)
+	}
+	if a.HasVendorID() && length < 12 {
+		return fmt.Errorf("invalid AVP length %d, with Vendor-ID must be >= 12", length)
+	}
+	// 你可以添加更多规则，比如Flags中保留位检查等
+	return nil
+}
+func (avp *AVPMsg) ToBytes() []byte {
+	buf := make([]byte, len(avp.head)+len(avp.other))
+	copy(buf[0:8], avp.head[:])
+	copy(buf[8:], avp.other)
+	return buf
+}

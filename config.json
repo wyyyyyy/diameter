@@ -1,6 +1,6 @@
 {
-  "origin_host": "client.example.com",
-  "origin_realm": "example.com",
+  "origin_host": "server.local",
+  "origin_realm": "server",
   "host_ip_address": "127.0.0.1",
   "product_name": "SimpleDiameterServer",
   "auth_application_id": 0,
