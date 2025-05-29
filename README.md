@@ -149,31 +149,29 @@ AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
 ### TESTR请求与响应（成功情况）
 ```
 
-
- [Diameter] 2025/05/29 00:35:21 handleDiameter req:
- Version: 1  Length: 172  Flags: 192  Command: TESTR(234567)  ApplicationId: 9527  Hop-by-Hop: 1235793302  End-to-End: 3021210053  
-AVP: Session-Id(263)  AVP-Flags: 64  AVP-Length: 42  AVP-Value: client.local;1748450113;1;app_test
+ [Diameter] 2025/05/29 16:44:09 handleDiameter req:
+ Version: 1  Length: 172  Flags: 192  Command: TESTR(234567)  ApplicationId: 9527  Hop-by-Hop: 1680242467  End-to-End: 3837646182  
+AVP: Session-Id(263)  AVP-Flags: 64  AVP-Length: 42  AVP-Value: client.local;1748508235;1;app_test
 AVP: (283)  AVP-Flags: 64  AVP-Length: 14  
 AVP: (293)  AVP-Flags: 64  AVP-Length: 20  
 AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: client.local
 AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: client
 AVP: Test-AVP(1)  AVP-Flags: 128  AVP-Length: 16  AVP-Value: 9527
-AVP: Test-Payload-AVP(2)  AVP-Flags: 128  AVP-Length: 20  
+AVP: Test-Payload-AVP(2)  AVP-Flags: 128  AVP-Length: 20  AVP-Value: 12345678
 
 
 
 
- [Diameter] 2025/05/29 00:35:21 handleDiameter rsp:
- Version: 1  Length: 200  Flags: 0  Command: TESTR(234567)  ApplicationId: 9527  Hop-by-Hop: 1235793302  End-to-End: 3021210053  
-AVP: Session-Id(263)  AVP-Flags: 64  AVP-Length: 42  AVP-Value: client.local;1748450113;1;app_test
+ [Diameter] 2025/05/29 16:44:09 handleDiameter rsp:
+ Version: 1  Length: 200  Flags: 0  Command: TESTR(234567)  ApplicationId: 9527  Hop-by-Hop: 1680242467  End-to-End: 3837646182  
+AVP: Session-Id(263)  AVP-Flags: 64  AVP-Length: 42  AVP-Value: client.local;1748508235;1;app_test
 AVP: Origin-Host(264)  AVP-Flags: 64  AVP-Length: 20  AVP-Value: server.local
 AVP: Origin-Realm(296)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: server
 AVP: Host-IP-Address(257)  AVP-Flags: 64  AVP-Length: 14  AVP-Value: 127.0.0.1
 AVP: Test-AVP(1)  AVP-Flags: 128  AVP-Length: 16  AVP-Value: 9527
-AVP: Test-Payload-AVP(2)  AVP-Flags: 128  AVP-Length: 20  
+AVP: Test-Payload-AVP(2)  AVP-Flags: 128  AVP-Length: 20  AVP-Value: 12345678
 AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
-AVP: EAP-Payload(462)  AVP-Flags: 64  AVP-Length: 36  
-
+AVP: EAP-Payload(462)  AVP-Flags: 64  AVP-Length: 36  AVP-Value: sadfljasdlkfjlasdjfkllaksdjf
 ```
 
 ### TESTR请求与响应（失败情况）
