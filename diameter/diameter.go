@@ -226,7 +226,13 @@ func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 
 	avpUserID, _ := msg.FindAVPByCode(AVP_UserName)
 	avpPassWD, _ := msg.FindAVPByCode(AVP_UserPassword)
-	//也是一样的入口处检查确保会有这来AVP
+	//也是一样的入口处检查确保会有这来AVP，但是data长度没检查
+	if avpUserID.GetDataLength() < 4 {
+		rspBuilder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_AuthenticationRejected).Build()).
+			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("userID or passWD wrong").Build())
+		return rspBuilder.Build(), nil
+	}
 	userID := avpUserID.GetIntData()
 	reqPasswd := avpPassWD.GetStringData()
 	rspBuilder.
