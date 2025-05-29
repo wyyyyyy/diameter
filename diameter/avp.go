@@ -279,6 +279,9 @@ func (a *AVPMsg) Validate() error {
 	if a.HasVendorID() && length < 12 {
 		return fmt.Errorf("invalid AVP length %d, with Vendor-ID must be >= 12", length)
 	}
+	if len(a.GetRawData()) < 4 {
+		return fmt.Errorf("invalid AVP data length %d, data len >= 4", length)
+	}
 	return nil
 }
 func (avp *AVPMsg) ToBytes() []byte {
