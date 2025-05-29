@@ -57,6 +57,23 @@ const (
 	// ...根据需要继续添加
 )
 
+var DataTypeMinLen = map[string]int{
+	"Integer32":        4,
+	"Integer64":        8,
+	"Unsigned32":       4,
+	"Unsigned64":       8,
+	"Float32":          4,
+	"Float64":          8,
+	"Enumerated":       4,
+	"Time":             4, // 基于 Unsigned32 的时间戳（自 1900 年起秒数）
+	"OctetString":      0,
+	"UTF8String":       0,
+	"DiameterIdentity": 0,
+	"DiameterURI":      0,
+	"IPAddress":        6,
+	"Grouped":          0,
+}
+
 const (
 	AVPFlag_VendorSpecific byte = 0x80 // Vendor-Specific flag
 	AVPFlag_Mandatory      byte = 0x40 // Mandatory flag
@@ -226,9 +243,7 @@ func (a *AVPMsg) GetRawData() []byte {
 }
 
 func (a *AVPMsg) GetDataLength() int {
-	offset := a.getOffset()
-	end := len(a.other) - a.GetPaddingLength()
-	return end - offset
+	return a.GetOtherLen() - a.GetPaddingLength() - a.getOffset()
 }
 
 // GetIntData 将有效数据视为 uint32（大端）
@@ -284,6 +299,11 @@ func (a *AVPMsg) Validate() error {
 	}
 	if a.HasVendorID() && length < 12 {
 		return fmt.Errorf("invalid AVP length %d, with Vendor-ID must be >= 12", length)
+	}
+	avpMeta := diameterDict.AVPs[a.GetCode()]
+	minDataLen := DataTypeMinLen[avpMeta.Type]
+	if a.GetDataLength() < minDataLen {
+		return fmt.Errorf("invalid AVP data length %d type:%v minlen:%d", length, avpMeta.Type, minDataLen)
 	}
 	return nil
 }
