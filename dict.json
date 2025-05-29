@@ -65,8 +65,8 @@
     { "name": "Result-Code", "code": 268, "type": "Unsigned32", "fixPos": 0 },
     { "name": "Error-Message", "code": 281, "type": "UTF8String", "fixPos": 0 },
     { "name": "Test-AVP", "code": 1, "type": "Unsigned32", "fixPos": 0 },
-    { "name": "Test-Payload-AVP", "code": 2, "type": "OctetString", "fixPos": 0 },
-    { "name": "EAP-Payload", "code": 462, "type": "OctetString", "fixPos": 0 },
+    { "name": "Test-Payload-AVP", "code": 2, "type": "UTF8String", "fixPos": 0 },
+    { "name": "EAP-Payload", "code": 462, "type": "UTF8String", "fixPos": 0 },
     { "name": "Origin-State-Id", "code": 273, "type": "Unsigned32", "fixPos": 0 }
   ]
 }

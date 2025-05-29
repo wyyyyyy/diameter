@@ -321,7 +321,7 @@ func (avp *AVPMsg) ToString() string {
 	fmt.Fprintf(&sb, "AVP-Flags: %v  ", avp.GetFlags())
 	fmt.Fprintf(&sb, "AVP-Length: %v  ", avp.GetLength())
 	typeStr := avpMeta.Type
-	if typeStr == "UTF8String" || typeStr == "DiameterIdentity" {
+	if typeStr == "UTF8String" || typeStr == "DiameterIdentity" || typeStr == "OctetString" {
 		fmt.Fprintf(&sb, "AVP-Value: %v", avp.GetStringData())
 	} else if typeStr == "Unsigned32" {
 		fmt.Fprintf(&sb, "AVP-Value: %v", avp.GetIntData())
