@@ -16,7 +16,7 @@
 │   ├── diameter.go  Diameter读写构造
 │   ├── server.go    处理socket，读写网络数据
 ├── diameter_server  编译后可执行文件
-├── dict.json        自定义diameter字典
+├── dict.json        自定义diameter字典,检查支持的CMD，必传AVP，AVP最短长度等等
 ├── fd-client2.conf  客户端freeDiameter配置文件
 ├── go.mod
 ├── logs             存储日志和wireshark抓包文件
