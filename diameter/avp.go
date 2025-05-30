@@ -54,6 +54,9 @@ const (
 	AVP_Drmp                  = 278
 	AVP_UserID                = 16777052
 	AVP_EAPPayload            = 462
+	AVP_SupportedVendorID     = 265
+	AVP_AcctApplicationId     = 259 //IETF 标准定义
+	AVP_DisconnectCause       = 273 //IETF 标准定义
 	// ...根据需要继续添加
 )
 
@@ -122,7 +125,7 @@ func (b *AVPBuilder) SetData(data []byte) *AVPBuilder {
 }
 
 func (b *AVPBuilder) Build() *AVPMsg {
-	// 构造 AVP 头部：Code (4 bytes), Flags + Length (3 bytes), Reserved (1 byte)
+	// 构造 AVP 头部：Code (4 bytes), Flags (1 bytes) + Length (3 bytes)
 	var head [8]byte
 	binary.BigEndian.PutUint32(head[0:4], b.code)
 
@@ -300,7 +303,7 @@ func (a *AVPMsg) Validate() error {
 	if a.HasVendorID() && length < 12 {
 		return fmt.Errorf("invalid AVP length %d, with Vendor-ID must be >= 12", length)
 	}
-	avpMeta := diameterDict.AVPs[a.GetCode()]
+	avpMeta := dict.AVPs[a.GetCode()]
 	minDataLen := DataTypeMinLen[avpMeta.Type]
 	if a.GetDataLength() < minDataLen {
 		return fmt.Errorf("invalid AVP data length %d type:%v minlen:%d", length, avpMeta.Type, minDataLen)
@@ -316,7 +319,7 @@ func (avp *AVPMsg) ToBytes() []byte {
 
 func (avp *AVPMsg) ToString() string {
 	var sb strings.Builder
-	avpMeta := diameterDict.AVPs[avp.GetCode()]
+	avpMeta := dict.AVPs[avp.GetCode()]
 	fmt.Fprintf(&sb, "AVP: %v(%v)  ", avpMeta.Name, avp.GetCode())
 	fmt.Fprintf(&sb, "AVP-Flags: %v  ", avp.GetFlags())
 	fmt.Fprintf(&sb, "AVP-Length: %v  ", avp.GetLength())

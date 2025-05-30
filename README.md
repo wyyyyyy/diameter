@@ -1,5 +1,12 @@
 # diameter服务器模拟
 
+## 更新记录
+
+### 2025.05.30
+1. 添加厂商、产品、应用、关闭原因等元数据信息
+2. 完善日志，打印厂商名称，产品名称，应用名称，关闭原因等。
+3. 添加会话状态/建联条件管理，新增响应错误处理。
+
 ## 功能介绍
 模拟diameter服务器，实现CER，DWR，DPR等请求的处理，自定义TESTR用于模拟认证,AVP缺失、认证失败等情况会返回错误码与原因。
 客户端使用freeDiameter，使用test_app插件模拟发送认证请求,修改了test_app插件代码，里面写死了username和password。没找到能模拟二阶段挑战认证的插件，先用test_app改改。
@@ -23,6 +30,7 @@
 │   ├── diameter_capture.pcap
 ├── main.go
 └── test_app.conf    freeDiameter扩展test_app的配置文件
+└── freeDiameter     freeDiameter客户端，已编译好
 
 ```
 ## 使用方法
@@ -66,7 +74,58 @@ PORT     STATE SERVICE
 
 Nmap done: 1 IP address (1 host up) scanned in 0.03 seconds
 ```
-### CER请求与响应
+### 交互日志
+
+#### 会话建连
+```
+ [Diameter] 2025/05/30 18:28:29 Listening on port 3868...
+ [Diameter] 2025/05/30 18:28:35 Accepted connection from 127.0.0.1:47558
+ [Diameter] 2025/05/30 18:28:35 local域的主机client.local 发起能力交换请求
+ [Diameter] 2025/05/30 18:28:35 local域的主机client.local ip地址为：172.18.161.120
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 厂商为：IETF
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 产品名为：freeDiameter
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 当前状态版本：1748600914
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 支持的厂商为：[Ericsson WY自定义厂商 3GPP]
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 支持的认证应用为：[Relay(中继)]
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 支持的计费应用为：[Relay(中继)]
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 与本端共同支持的认证应用为: [Relay(中继)]
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 与本端共同支持的计费应用为: [Relay(中继)]
+ [Diameter] 2025/05/30 18:28:38 local域的主机client.local 发起能力交换请求,与本端有共同支持的应用，接受对端，会话已建立
+```
+#### 会话保活
+```
+ [Diameter] 2025/05/30 18:29:10 local域的主机client.local 发起保活请求
+ [Diameter] 2025/05/30 18:29:10 local域的主机client.local 会话保活成功
+ [Diameter] 2025/05/30 18:29:40 local域的主机client.local 发起保活请求
+ [Diameter] 2025/05/30 18:29:40 local域的主机client.local 会话保活成功
+ [Diameter] 2025/05/30 18:30:09 local域的主机client.local 发起保活请求
+ [Diameter] 2025/05/30 18:30:09 local域的主机client.local 会话保活成功
+```
+#### 模拟认证(成功)
+```
+ [Diameter] 2025/05/30 18:30:27 local域的主机client.local 申请认证用户名:9527
+ [Diameter] 2025/05/30 18:30:27 local域的主机client.local 申请认证密码:12345678
+ [Diameter] 2025/05/30 18:30:27 local域的主机client.local 认证通过，授予令牌:sadfljasdlkfjlasdjfkllaksdjf
+```
+
+#### 模拟认证(失败)
+```
+[Diameter] 2025/05/30 18:42:32 local域的主机client.local 发起认证请求
+ [Diameter] 2025/05/30 18:42:32 local域的主机client.local 申请认证用户名:9527
+ [Diameter] 2025/05/30 18:42:32 local域的主机client.local 申请认证密码:12345678
+ [Diameter] 2025/05/30 18:42:32 local域的主机client.local 认证不通过，用户名或密码错误
+```
+
+#### 主动关闭
+```
+ [Diameter] 2025/05/30 19:04:34 local域的主机client.local 发起会话关闭请求,原因：REBOOTING
+ [Diameter] 2025/05/30 19:04:34 local域的主机client.local 会话已关闭
+```
+
+![CEA](./logs/认证失败全流程.png)
+![CEA](./logs/认证通过全流程.png)
+### 调试日志
+#### CER请求与响应
 ```
  [Diameter] 2025/05/29 00:34:58 Listening on port 3868...
  [Diameter] 2025/05/29 00:35:13 Accepted connection from 127.0.0.1:59026
@@ -98,7 +157,7 @@ AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameter
 AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
 ```
 
-### DWR请求与响应
+#### DWR请求与响应
 ```
 
  [Diameter] 2025/05/29 00:37:31 handleDiameter req:
@@ -122,7 +181,7 @@ AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
 
 ```
 
-### DPR请求与响应
+#### DPR请求与响应
 ```
 
 
@@ -146,7 +205,7 @@ AVP: Product-Name(269)  AVP-Flags: 64  AVP-Length: 28  AVP-Value: SimpleDiameter
 AVP: Auth-Application-Id(258)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 0
 ```
 
-### TESTR请求与响应（成功情况）
+#### TESTR请求与响应（成功情况）
 ```
 
  [Diameter] 2025/05/29 16:44:09 handleDiameter req:
@@ -174,7 +233,7 @@ AVP: Result-Code(268)  AVP-Flags: 64  AVP-Length: 12  AVP-Value: 2001
 AVP: EAP-Payload(462)  AVP-Flags: 64  AVP-Length: 36  AVP-Value: sadfljasdlkfjlasdjfkllaksdjf
 ```
 
-### TESTR请求与响应（失败情况）
+#### TESTR请求与响应（失败情况）
 ```
 
  [Diameter] 2025/05/29 00:51:28 handleDiameter req:

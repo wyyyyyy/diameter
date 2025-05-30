@@ -10,6 +10,7 @@
         [296],
         [257],
         [266],
+        [269],
         [258, 259, 260]
       ]
     },
@@ -65,8 +66,44 @@
     { "name": "Result-Code", "code": 268, "type": "Unsigned32", "fixPos": 0 },
     { "name": "Error-Message", "code": 281, "type": "UTF8String", "fixPos": 0 },
     { "name": "Test-AVP", "code": 1, "type": "Unsigned32", "fixPos": 0 },
-    { "name": "Test-Payload-AVP", "code": 2, "type": "UTF8String", "fixPos": 0 },
-    { "name": "EAP-Payload", "code": 462, "type": "UTF8String", "fixPos": 0 },
+    { "name": "Test-Payload-AVP", "code": 2, "type": "OctetString", "fixPos": 0 },
+    { "name": "EAP-Payload", "code": 462, "type": "OctetString", "fixPos": 0 },
     { "name": "Origin-State-Id", "code": 273, "type": "Unsigned32", "fixPos": 0 }
-  ]
+  ],
+  "auth_app_meta": {
+    "0": "Diameter Common Messages",
+    "1": "NASREQ Application",
+    "4294967295": "Relay(auth 中继)"
+  },
+  "acct_app_meta": {
+    "3": "Base Accounting",
+    "4": "Credit-Control Application",
+    "4294967295": "Relay(acct 中继)"
+  },
+  "vendor_meta": {
+    "0": "IETF",
+    "9": "IBM",
+    "11": "HP",
+    "209": "Cisco",
+    "674": "Check Point",
+    "10415": "3GPP",
+    "2011": "Huawei",
+    "2636": "Juniper",
+    "26512": "ZTE",
+    "30136": "F5 Networks",
+    "343": "Nortel Networks",
+    "5535": "Ericsson",
+    "14551": "Nokia Siemens Networks",
+    "6027": "Alcatel-Lucent",
+    "8072": "Net-SNMP",
+    "8164": "Oracle",
+    "12356": "Fortinet",
+    "999999": "Test",
+    "9527": "WY自定义厂商"
+  },
+    "cause_meta": {
+    "0": "REBOOTING",
+    "1": "BUSY",
+    "2": "DO_NOT_WANT_TO_TALK_TO_YOU"
+  }
 }

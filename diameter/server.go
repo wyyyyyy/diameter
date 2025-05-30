@@ -28,12 +28,6 @@ func StartServer(port *int) {
 	}
 }
 
-type Session struct {
-	ID        string
-	needClose bool
-	// 其他字段...
-}
-
 // 单个会话处理
 func handleConnection(conn net.Conn) {
 	defer recover()
@@ -95,17 +89,17 @@ func handleConnection(conn net.Conn) {
 		}
 
 		// 处理diameterMsg，err是要断开连接的，不想断开连接的不要返回err，业务err在rsp中返回
-		log.Printf("handleDiameter req:\n %s\n\n\n\n", diameterMsg.toString())
+		// log.Printf("handleDiameter req:\n %s\n\n\n\n", diameterMsg.toString())
 		rsp, err := handleDiameter(session, &diameterMsg)
 		if rsp != nil {
 			conn.Write(rsp.ToBytes())
-			log.Printf("handleDiameter rsp:\n %s\n\n\n\n", rsp.toString())
+			// log.Printf("handleDiameter rsp:\n %s\n\n\n\n", rsp.toString())
 		}
 		if err != nil {
 			log.Printf("handleDiameter err\n %v", err)
 			return
 		}
-		if session.needClose {
+		if session.NeedClose {
 			log.Print("handleDiameter finish\n")
 			return
 		}

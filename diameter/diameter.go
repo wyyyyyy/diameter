@@ -18,13 +18,13 @@ func init() {
 	if err != nil {
 		log.Fatalf("Load config failed: %v", err)
 	}
-	diameterDict, err = LoadDiameterMetaDictFromFile("dict.json")
+	dict, err = LoadDiameterMetaDictFromFile("dict.json")
 	if err != nil {
 		panic(err)
 	}
 }
 
-var diameterDict *DiameterMetaDict
+var dict *DiameterMetaDict
 var config DiameterConfig
 
 func LoadConfig(path string) error {
@@ -42,16 +42,32 @@ func LoadConfig(path string) error {
 	return json.Unmarshal(bytes, &config)
 }
 
+type Session struct {
+	ID        string
+	NeedClose bool
+	State     string
+}
+
+const (
+	StateNew            = "New"            // 会话刚创建
+	StateEstablished    = "Established"    // 握手完成，可正常处理业务
+	StateAuthInProgress = "AuthInProgress" // 认证中
+	StateAcctInProgress = "AcctInProgress" // 计费中
+	StateClosing        = "Closing"        // 发起断开中
+	StateClosed         = "Closed"         // 会话已关闭
+)
+
 type DiameterConfig struct {
-	OriginHost        string            `json:"origin_host"`
-	OriginRealm       string            `json:"origin_realm"`
-	HostIPAddress     string            `json:"host_ip_address"`
-	ProductName       string            `json:"product_name"`
-	CommandAppMap     map[string]uint32 `json:"command_app_map"`
-	UserID2passWD     map[string]string `json:"userid_2_password"`
-	UserID2OauthToken map[string]string `json:"userid_2_oauthtoken"`
-	VendorID          uint32            `json:"vendor_id"`
-	AuthApplicationId uint32            `json:"auth_application_id"`
+	OriginHost         string            `json:"origin_host"`
+	OriginRealm        string            `json:"origin_realm"`
+	HostIPAddress      string            `json:"host_ip_address"`
+	ProductName        string            `json:"product_name"`
+	CommandAppMap      map[string]uint32 `json:"command_app_map"`
+	UserID2passWD      map[string]string `json:"userid_2_password"`
+	UserID2OauthToken  map[string]string `json:"userid_2_oauthtoken"`
+	VendorID           uint32            `json:"vendor_id"`
+	AuthApplicationIds []uint32          `json:"auth_application_ids"`
+	AcctApplicationIds []uint32          `json:"acct_application_ids"`
 }
 
 func (c *DiameterConfig) GetAppID(cmdID uint32) uint32 {
@@ -91,6 +107,7 @@ const (
 	ResultCode_AVPUnsupported         = 5001 // 不支持的 AVP
 	ResultCode_UnknownSessionID       = 5002 // 会话 ID 未知
 	ResultCode_AuthenticationRejected = 4001 // 拒绝认证（常用于 AAA）
+	ResultCode_NoCommonApplication    = 5010 // 没有公共的认证、计费应用
 
 	// 应用错误类（Transient Failures 4xxx）
 	ResultCode_UnableToComply = 5012 // 无法满足请求
@@ -152,6 +169,62 @@ func handleDiameter(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 // ///////////////////////////////////////////////////////////////////////////////////////
 
 func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	// 解析CER并应用
+	hostAVP, _ := msg.FindAVPByCode(AVP_OriginHost)
+	realmAVP, _ := msg.FindAVPByCode(AVP_OriginRealm)
+	log.Printf("%v域的主机%v 发起能力交换请求", realmAVP.GetStringData(), hostAVP.GetStringData())
+
+	ipAVP, _ := msg.FindAVPByCode(AVP_HostIPAddress)
+	log.Printf("%v域的主机%v ip地址为：%v", realmAVP.GetStringData(), hostAVP.GetStringData(), ipAVP.GetIPAddrData())
+	vendorAVP, _ := msg.FindAVPByCode(AVP_VendorId)
+	log.Printf("%v域的主机%v 厂商为：%v", realmAVP.GetStringData(), hostAVP.GetStringData(), dict.VendorMeta[strconv.Itoa(int(vendorAVP.GetIntData()))])
+	productAVP, _ := msg.FindAVPByCode(AVP_ProductName)
+	log.Printf("%v域的主机%v 产品名为：%v", realmAVP.GetStringData(), hostAVP.GetStringData(), productAVP.GetStringData())
+	originStateAVP, _ := msg.FindAVPByCode(AVP_OriginStateId)
+	log.Printf("%v域的主机%v 当前状态版本：%v", realmAVP.GetStringData(), hostAVP.GetStringData(), originStateAVP.GetIntData())
+
+	supportedVendorAVPs := msg.FindAVPsByCode(AVP_SupportedVendorID)
+	supportedVendorIDs := []uint32{}
+	for _, avp := range supportedVendorAVPs {
+		supportedVendorIDs = append(supportedVendorIDs, avp.GetIntData())
+	}
+	log.Printf("%v域的主机%v 支持的厂商为：%v",
+		realmAVP.GetStringData(),
+		hostAVP.GetStringData(),
+		id2name(supportedVendorIDs, dict.VendorMeta))
+
+	clientAuthAppAVPs := msg.FindAVPsByCode(AVP_AuthApplicationId)
+	clientAuthAppIDs := []uint32{}
+	msg.GetApplicationID()
+	for _, appIDavp := range clientAuthAppAVPs {
+		clientAuthAppIDs = append(clientAuthAppIDs, appIDavp.GetIntData())
+	}
+	log.Printf("%v域的主机%v 支持的认证应用为：%v",
+		realmAVP.GetStringData(),
+		hostAVP.GetStringData(),
+		id2name(clientAuthAppIDs, dict.AuthAppMeta))
+	clientAcctAppAVPs := msg.FindAVPsByCode(AVP_AcctApplicationId)
+	clientAcctAppIDs := []uint32{}
+	for _, appIDavp := range clientAcctAppAVPs {
+		clientAcctAppIDs = append(clientAcctAppIDs, appIDavp.GetIntData())
+	}
+	log.Printf("%v域的主机%v 支持的计费应用为：%v",
+		realmAVP.GetStringData(),
+		hostAVP.GetStringData(),
+		id2name(clientAcctAppIDs, dict.AcctAppMeta))
+
+	shareAuthAppIDs := intersect(clientAuthAppIDs, config.AuthApplicationIds)
+	shareAuthAppNames := id2name(shareAuthAppIDs, dict.AuthAppMeta)
+	shareAcctAppIDs := intersect(clientAcctAppIDs, config.AcctApplicationIds)
+	shareAcctAppNames := id2name(shareAcctAppIDs, dict.AcctAppMeta)
+
+	if len(shareAuthAppIDs) > 0 {
+		log.Printf("%v域的主机%v 与本端共同支持的认证应用为: %v", realmAVP.GetStringData(), hostAVP.GetStringData(), shareAuthAppNames)
+	}
+	if len(shareAcctAppIDs) > 0 {
+		log.Printf("%v域的主机%v 与本端共同支持的计费应用为: %v", realmAVP.GetStringData(), hostAVP.GetStringData(), shareAcctAppNames)
+	}
+
 	// 构造并发送 CEA
 	builder := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()).
@@ -161,18 +234,40 @@ func handleCER(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		SetFlags(FlagResponse).
 		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
 		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
-		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
 		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
-		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
-		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build())
+		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build())
+	for _, appID := range config.AuthApplicationIds {
+		builder.
+			AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(appID).Build())
+	}
+	for _, appID := range config.AcctApplicationIds {
+		builder.
+			AddAVP(NewAVPBuilder(AVP_AcctApplicationId, AVPFlag_Mandatory).SetIntData(appID).Build())
+	}
+
+	if len(shareAuthAppIDs) > 0 || len(shareAcctAppIDs) > 0 {
+		session.State = StateEstablished
+		builder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build())
+		log.Printf("%v域的主机%v 结束能力交换请求,与本端有共同支持的应用，接受对端，会话已建立", realmAVP.GetStringData(), hostAVP.GetStringData())
+	} else {
+		log.Printf("%v域的主机%v 结束能力交换请求,与本端无共同支持的应用，忽略对端", realmAVP.GetStringData(), hostAVP.GetStringData())
+		builder.
+			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_NoCommonApplication).Build())
+	}
 
 	// 4. 构建消息（自动算总长）
 	return builder.Build(), nil
 }
 
+// 保活
 func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
-	rsp := NewDiameterMsgBuilder().
+	hostAVP, _ := msg.FindAVPByCode(AVP_OriginHost)
+	realmAVP, _ := msg.FindAVPByCode(AVP_OriginRealm)
+	log.Printf("%v域的主机%v 发起保活请求", realmAVP.GetStringData(), hostAVP.GetStringData())
+
+	rspBuilder := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
 		SetAppID(msg.GetApplicationID()).
 		SetFlags(FlagResponse).             // R标志，响应消息
@@ -180,16 +275,28 @@ func handleDWR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		SetEndToEndID(msg.GetEndToEndID()).
 		AddAVP(NewAVPBuilder(AVP_OriginHost, AVPFlag_Mandatory).SetStringData(config.OriginHost).Build()).
 		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
-		AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build()).
 		AddAVP(NewAVPBuilder(AVP_VendorId, AVPFlag_Mandatory).SetIntData(config.VendorID).Build()).
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
-		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build()).
-		Build()
-	return rsp, nil
+		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build())
+
+	if session.State != StateEstablished {
+		log.Printf("%v域的主机%v 当前未建立会话，保活失败", realmAVP.GetStringData(), hostAVP.GetStringData())
+		rspBuilder.AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_UnableToDeliver).Build())
+		rspBuilder.AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("session not established, send CER first").Build())
+	}
+	log.Printf("%v域的主机%v 会话保活成功", realmAVP.GetStringData(), hostAVP.GetStringData())
+	rspBuilder.AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build())
+	return rspBuilder.Build(), nil
 }
 
+// 关闭
 func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	hostAVP, _ := msg.FindAVPByCode(AVP_OriginHost)
+	realmAVP, _ := msg.FindAVPByCode(AVP_OriginRealm)
+	causeAVP, _ := msg.FindAVPByCode(AVP_DisconnectCause)
+	log.Printf("%v域的主机%v 发起会话关闭请求,原因：%v", realmAVP.GetStringData(), hostAVP.GetStringData(), dict.CauseMeta[strconv.Itoa(int(causeAVP.GetIntData()))])
+
 	// 构造并发送 DPA
 	rsp := NewDiameterMsgBuilder().
 		SetCommandCode(msg.GetCommandCode()). // DWA 命令码
@@ -205,11 +312,17 @@ func handleDPR(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_ProductName, AVPFlag_Mandatory).SetStringData(config.ProductName).Build()).
 		AddAVP(NewAVPBuilder(AVP_AuthApplicationId, AVPFlag_Mandatory).SetIntData(msg.GetApplicationID()).Build()).
 		Build()
-	session.needClose = true
+	session.NeedClose = true
+	session.State = StateClosing
+	log.Printf("%v域的主机%v 会话已关闭", realmAVP.GetStringData(), hostAVP.GetStringData())
 	return rsp, nil
 }
 
 func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
+	hostAVP, _ := msg.FindAVPByCode(AVP_OriginHost)
+	realmAVP, _ := msg.FindAVPByCode(AVP_OriginRealm)
+	log.Printf("%v域的主机%v 发起认证请求", realmAVP.GetStringData(), hostAVP.GetStringData())
+
 	// 前面做了检查，这里确保会有，如果没有的话应该修复入口处检查的问题
 	sessionAVP, _ := msg.FindAVPByCode(AVP_SessionId)
 
@@ -224,6 +337,12 @@ func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 		AddAVP(NewAVPBuilder(AVP_OriginRealm, AVPFlag_Mandatory).SetStringData(config.OriginRealm).Build()).
 		AddAVP(NewAVPBuilder(AVP_HostIPAddress, AVPFlag_Mandatory).SetIpData(net.ParseIP(config.HostIPAddress)).Build())
 
+	if session.State != StateEstablished {
+		rspBuilder.AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_UnableToDeliver).Build())
+		rspBuilder.AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("session not established, send CER first").Build())
+		return rspBuilder.Build(), nil
+	}
+
 	avpUserID, _ := msg.FindAVPByCode(AVP_UserName)
 	avpPassWD, _ := msg.FindAVPByCode(AVP_UserPassword)
 	//也是一样的入口处检查确保会有这来AVP，但是data长度没检查
@@ -235,21 +354,24 @@ func handleTest(session *Session, msg *DiameterMsg) (*DiameterMsg, error) {
 	}
 	userID := avpUserID.GetIntData()
 	reqPasswd := avpPassWD.GetStringData()
-	rspBuilder.
-		AddAVP(avpUserID).
-		AddAVP(avpPassWD)
+
+	log.Printf("%v域的主机%v 申请认证用户名:%v", realmAVP.GetStringData(), hostAVP.GetStringData(), userID)
+	log.Printf("%v域的主机%v 申请认证密码:%v", realmAVP.GetStringData(), hostAVP.GetStringData(), reqPasswd)
+	rspBuilder.AddAVP(avpUserID).AddAVP(avpPassWD)
 
 	if passwd, ok := config.UserID2passWD[strconv.Itoa(int(userID))]; ok && reqPasswd == passwd {
 		//验证通过，返回令牌
+		authToken := config.UserID2OauthToken[strconv.Itoa(int(userID))]
 		rspBuilder.
 			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_Success).Build()).
-			AddAVP(NewAVPBuilder(AVP_EAPPayload, AVPFlag_Mandatory).SetStringData(config.UserID2OauthToken[strconv.Itoa(int(userID))]).Build())
-
+			AddAVP(NewAVPBuilder(AVP_EAPPayload, AVPFlag_Mandatory).SetStringData(authToken).Build())
+		log.Printf("%v域的主机%v 认证通过，授予令牌:%v", realmAVP.GetStringData(), hostAVP.GetStringData(), authToken)
 		return rspBuilder.Build(), nil
 	} else {
 		rspBuilder.
 			AddAVP(NewAVPBuilder(AVP_ResultCode, AVPFlag_Mandatory).SetIntData(ResultCode_AuthenticationRejected).Build()).
 			AddAVP(NewAVPBuilder(AVP_ErrorMessage, AVPFlag_Mandatory).SetStringData("userID or passWD wrong").Build())
+		log.Printf("%v域的主机%v 认证不通过，用户名或密码错误", realmAVP.GetStringData(), hostAVP.GetStringData())
 		return rspBuilder.Build(), nil
 	}
 }
@@ -320,7 +442,7 @@ func (m *DiameterMsg) toString() string {
 	fmt.Fprintf(&sb, "Version: %v  ", m.GetVersion())
 	fmt.Fprintf(&sb, "Length: %v  ", m.GetMessageLength())
 	fmt.Fprintf(&sb, "Flags: %v  ", m.GetFlags())
-	commmandMeta := diameterDict.Commands[m.GetCommandCode()]
+	commmandMeta := dict.Commands[m.GetCommandCode()]
 	fmt.Fprintf(&sb, "Command: %v(%v)  ", commmandMeta.Name, m.GetCommandCode())
 	fmt.Fprintf(&sb, "ApplicationId: %v  ", m.GetApplicationID())
 	fmt.Fprintf(&sb, "Hop-by-Hop: %v  ", m.GetHopByHopID())
@@ -376,7 +498,7 @@ func (d *DiameterMsg) Validate() error {
 func (d *DiameterMsg) ValidateAVP() error {
 
 	// 检查该带的AVP是不是都带了，带多了没关系
-	commandMeta, ok := diameterDict.Commands[d.GetCommandCode()]
+	commandMeta, ok := dict.Commands[d.GetCommandCode()]
 	if !ok {
 		return fmt.Errorf("command Not support")
 	}
@@ -479,18 +601,25 @@ type CommandMeta struct {
 }
 
 type DiameterMetaDict struct {
-	Commands map[uint32]CommandMeta `json:"commands"`
-	AVPs     map[uint32]AVPMeta     `json:"avps"`
+	Commands    map[uint32]CommandMeta `json:"commands"`
+	AVPs        map[uint32]AVPMeta     `json:"avps"`
+	AuthAppMeta map[string]string      `json:"auth_app_meta"`
+	AcctAppMeta map[string]string      `json:"acct_app_meta"`
+	VendorMeta  map[string]string      `json:"vendor_meta"`
+	CauseMeta   map[string]string      `json:"cause_meta"`
 }
 
 // 临时结构体，用于 JSON 反序列化（Command 里 AVPs 是二维数组）
 // 因为JSON的map key只能是string，所以先用slice，后面转换为map
 type diameterMetaDictRaw struct {
-	Commands []CommandMeta `json:"commands"`
-	AVPs     []AVPMeta     `json:"avps"`
+	Commands    []CommandMeta     `json:"commands"`
+	AVPs        []AVPMeta         `json:"avps"`
+	AuthAppMeta map[string]string `json:"auth_app_meta"`
+	AcctAppMeta map[string]string `json:"acct_app_meta"`
+	VendorMeta  map[string]string `json:"vendor_meta"`
+	CauseMeta   map[string]string `json:"cause_meta"`
 }
 
-// LoadDiameterMetaDictFromFile 从文件加载并转换成 DiameterMetaDict
 func LoadDiameterMetaDictFromFile(filename string) (*DiameterMetaDict, error) {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -503,16 +632,18 @@ func LoadDiameterMetaDictFromFile(filename string) (*DiameterMetaDict, error) {
 	}
 
 	dict := &DiameterMetaDict{
-		Commands: make(map[uint32]CommandMeta),
-		AVPs:     make(map[uint32]AVPMeta),
+		Commands:    make(map[uint32]CommandMeta),
+		AVPs:        make(map[uint32]AVPMeta),
+		AuthAppMeta: raw.AuthAppMeta,
+		AcctAppMeta: raw.AcctAppMeta,
+		VendorMeta:  raw.VendorMeta,
+		CauseMeta:   raw.CauseMeta,
 	}
 
-	// AVP 转 map[code]AVPMeta
 	for _, avp := range raw.AVPs {
 		dict.AVPs[avp.Code] = avp
 	}
 
-	// Command 转 map[code]CommandMeta
 	for _, cmd := range raw.Commands {
 		dict.Commands[cmd.Code] = cmd
 	}
